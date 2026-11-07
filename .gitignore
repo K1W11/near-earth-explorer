@@ -1,0 +1,23 @@
+# Blocks node_modules in the root AND in any nested subfolders (e.g., apps/api/node_modules)
+node_modules/
+
+# Blocks log files everywhere
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Blocks environment variable files everywhere
+.env
+.env.*
+!.env.example
+
+# Blocks build outputs and caches everywhere
+dist/
+build/
+.cache/
+
+# Operating system / IDE files
+.DS_Store
+.vscode/
+.idea/
