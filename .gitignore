@@ -12,6 +12,9 @@ yarn-error.log*
 .env.*
 !.env.example
 
+# Blocks Python virtual environments
+backend/venv/
+
 # Blocks build outputs and caches everywhere
 dist/
 build/
