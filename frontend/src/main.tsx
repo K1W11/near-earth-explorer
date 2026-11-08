@@ -1,27 +1,56 @@
-import './style.css'
-import type { Component } from 'dreamland/core'
+import { css, type Component } from "dreamland/core";
+import { Router, Route } from "dreamland/router";
+import { createDelegate } from "dreamland/core";
 
-const Counter: Component<{}, { count: number }> = function () {
-  this.count = 0
+import { MainView } from "./views/MainView";
+import { AppView } from "./views/AppView";
+import { NotFoundView } from "./views/NotFoundView";
+import { createLayout } from "./components/Layout";
 
-  return (
-    <main class="counter-demo">
-      <section class="counter-card">
-        <p class="eyebrow">abc abc abc abc</p>
-        <h1>Counter</h1>
-        <p class="count">{use(this.count)}</p>
-        <button type="button" on:click={() => this.count++}>
-          Increment
-        </button>
-      </section>
-    </main>
-  )
-}
+const App: Component<{ url?: string }> = function () {
+	const setStarSpeedEased = createDelegate<number>();
 
-const app = document.querySelector<HTMLDivElement>('#app')
+	return (
+		<div id="app">
+			<Router initial={this.url ? [this.url, "http://127.0.0.1:5173"] : []}>
+				<Route layout={createLayout(setStarSpeedEased)}>
+					<Route show={<MainView />} />
+					<Route path="app" show={<AppView />} />
+					<Route path="*" show={<NotFoundView />} />
+				</Route>
+			</Router>
+		</div>
+	);
+};
 
-if (!app) {
-  throw new Error('App mount point #app was not found')
-}
+App.style = css`
+	:global(:root) {
+		font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+		color: white;
+		color-scheme: dark;
+		background: black;
+		font-synthesis: none;
+		text-rendering: optimizeLegibility;
+		-webkit-font-smoothing: antialiased;
+	}
 
-app.append(<Counter />)
+	:global(*) {
+		box-sizing: border-box;
+	}
+
+	:global(body) {
+		margin: 0;
+		min-width: 320px;
+	}
+
+	:global(a) {
+		color: inherit;
+		text-decoration: none;
+	}
+
+	:global(button) {
+		font: inherit;
+	}
+`;
+
+export default (url?: string) => <App url={url} />;
