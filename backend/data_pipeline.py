@@ -22,6 +22,7 @@ Public API:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Dict, List, TypeVar
@@ -38,6 +39,11 @@ CELESTRAK_ACTIVE_TLE_URL = (
     "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle"
 )
 """CelesTrak endpoint that returns active satellites in three-line TLE format."""
+
+SATNOGS_ACTIVE_TLE_URL = "https://db.satnogs.org/api/tle/?format=json&status=alive"
+"""SatNOGS fallback endpoint for currently alive satellites in TLE format."""
+
+logger = logging.getLogger(__name__)
 
 _cache: Dict[str, Dict[str, Any]] = {}
 """Dataset cache: keys map to ``{"timestamp": float, "data": payload}`` entries."""
@@ -219,6 +225,32 @@ def _parse_active_satellites(document: str) -> List[Dict[str, str]]:
     return satellites
 
 
+def _parse_satnogs_satellites(payload: Any) -> List[Dict[str, str]]:
+    """Normalize SatNOGS' JSON TLE records to the pipeline's shared shape."""
+    if not isinstance(payload, list):
+        raise ValueError("SatNOGS returned an invalid satellite payload")
+
+    satellites: List[Dict[str, str]] = []
+    for record in payload:
+        if not isinstance(record, dict):
+            continue
+        name = record.get("tle0")
+        tle1 = record.get("tle1")
+        tle2 = record.get("tle2")
+        if not all(isinstance(value, str) for value in (name, tle1, tle2)):
+            continue
+        if not tle1.startswith("1 ") or not tle2.startswith("2 "):
+            continue
+        satellites.append(
+            {
+                "name": name.removeprefix("0 ").strip(),
+                "tle1": tle1,
+                "tle2": tle2,
+            }
+        )
+    return satellites
+
+
 async def fetch_active_satellites() -> List[Dict[str, str]]:
     """Fetch and return CelesTrak's active satellite TLE catalog.
 
@@ -234,10 +266,25 @@ async def fetch_active_satellites() -> List[Dict[str, str]]:
     async def request_and_parse() -> List[Dict[str, str]]:
         """Download the active TLE text document and parse its three-line blocks."""
         headers = {
-            "User-Agent": "NearEarthExplorer/1.0 (educational hackathon project)"
+            "Accept": "text/plain",
+            "Referer": "https://celestrak.org/",
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
+            ),
         }
         async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
             response = await client.get(CELESTRAK_ACTIVE_TLE_URL)
+            if response.status_code == 403:
+                logger.warning(
+                    "CelesTrak active feed returned 403; using SatNOGS alive-satellite fallback"
+                )
+                fallback_response = await client.get(
+                    SATNOGS_ACTIVE_TLE_URL,
+                    headers={"Accept": "application/json"},
+                )
+                fallback_response.raise_for_status()
+                return _parse_satnogs_satellites(fallback_response.json())
             response.raise_for_status()
             document = response.text
         return _parse_active_satellites(document)

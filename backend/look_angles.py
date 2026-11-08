@@ -55,6 +55,33 @@ def _utc_julian_date(moment: datetime) -> tuple[float, float]:
     )
 
 
+def calculate_altitude_km(
+    tle_line1: str,
+    tle_line2: str,
+    *,
+    at: datetime | None = None,
+) -> float:
+    """Propagate a TLE and return its geocentric altitude in kilometers."""
+    if not tle_line1.startswith("1 ") or not tle_line2.startswith("2 "):
+        raise ValueError("A valid TLE line 1 and line 2 are required")
+
+    try:
+        satellite = Satrec.twoline2rv(tle_line1, tle_line2)
+    except ValueError as error:
+        raise ValueError(f"Could not parse satellite TLE: {error}") from error
+
+    moment = at if at is not None else datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    jd, fraction = _utc_julian_date(moment.astimezone(timezone.utc))
+    error_code, position_eci_km, _ = satellite.sgp4(jd, fraction)
+    if error_code != 0:
+        raise ValueError(f"SGP4 propagation failed with error code {error_code}")
+
+    distance_km = math.sqrt(sum(axis**2 for axis in position_eci_km))
+    return max(0.0, distance_km - _WGS84_SEMI_MAJOR_AXIS_KM)
+
+
 def _greenwich_mean_sidereal_time(julian_date: float) -> float:
     """Calculate Greenwich Mean Sidereal Time in radians.
 

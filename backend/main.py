@@ -33,7 +33,7 @@ from httpx import HTTPError
 from pydantic import BaseModel, Field
 
 from data_pipeline import fetch_active_satellites, fetch_asteroids
-from look_angles import calculate_look_angles
+from look_angles import calculate_altitude_km, calculate_look_angles
 
 # Resolve configuration relative to this file so launching from the repository
 # root or from backend/ loads the same local secrets file.
@@ -97,6 +97,22 @@ class NarrationRequest(BaseModel):
 
     object_name: str = Field(min_length=1, max_length=200)
     object_type: Literal["satellite", "asteroid"]
+
+
+class SatelliteRecord(BaseModel):
+    """Normalized active satellite record returned to the frontend."""
+
+    name: str
+    tle1: str
+    tle2: str
+    altitude_km: float
+
+
+class ActiveSatellitesResponse(BaseModel):
+    """Active satellite records and the number returned."""
+
+    count: int
+    satellites: list[SatelliteRecord]
 
 
 def _tool_declarations() -> list[types.Tool]:
@@ -297,7 +313,7 @@ async def closest_asteroid() -> dict[str, Any]:
 @app.get("/api/satellites/active")
 async def active_satellites(
     limit: int = Query(default=50, ge=1, le=500, description="Maximum satellites to return."),
-) -> dict[str, Any]:
+) -> ActiveSatellitesResponse:
     """Return at most ``limit`` active CelesTrak satellites and their TLEs.
 
     Query schema:
@@ -315,8 +331,15 @@ async def active_satellites(
             status_code=502,
             detail="CelesTrak is temporarily unavailable.",
         ) from error
-    selected = satellites[:limit]
-    return {"count": len(selected), "satellites": selected}
+    selected = []
+    for satellite in satellites[:limit]:
+        try:
+            altitude_km = calculate_altitude_km(satellite["tle1"], satellite["tle2"])
+        except ValueError as error:
+            logger.warning("Skipping satellite with invalid TLE %s: %s", satellite["name"], error)
+            continue
+        selected.append({**satellite, "altitude_km": round(altitude_km, 1)})
+    return ActiveSatellitesResponse(count=len(selected), satellites=selected)
 
 
 @app.post("/api/observer/look-angles")
