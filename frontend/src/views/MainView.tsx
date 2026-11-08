@@ -8,10 +8,6 @@ export const MainView: Component = function () {
       <h1>Near Earth Explorer</h1>
       <p class="intro">A blank starting point for the main page.</p>
       <Link href="/app" class="button-link">Open the app</Link>
-
-      {new Array(20).fill(0).map((_, i) => (
-        <p key={i}>This is some filler content to make the page scrollable.</p>
-      ))}
     </section>
   )
 }

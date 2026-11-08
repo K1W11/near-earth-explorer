@@ -1,5 +1,5 @@
 import { css, type Component } from 'dreamland/core'
-import { narrateTarget, type NarrationTargetType, type SatelliteNarrationCategory } from '../api/backend'
+import { narrateResponse, narrateTarget, type NarrationTargetType, type SatelliteNarrationCategory } from '../api/backend'
 import speakerIcon from 'iconoir/icons/regular/sound-high.svg?raw'
 import { IconoirIcon } from './IconoirIcon'
 
@@ -16,7 +16,7 @@ type NarrationPlayerState = {
  * Must be started by a click: browsers block audio that starts on its own.
  */
 export const NarrationPlayer: Component<
-  { name: string; type: NarrationTargetType; category?: SatelliteNarrationCategory; compact?: boolean; disabled?: boolean; onNotification?: (message: string, error?: boolean, stop?: () => void) => void },
+  { name?: string; responseId?: string; type?: NarrationTargetType; category?: SatelliteNarrationCategory; compact?: boolean; disabled?: boolean; onNotification?: (message: string, error?: boolean, stop?: () => void) => void },
   NarrationPlayerState
 > = function () {
   this.status = 'idle'
@@ -47,7 +47,9 @@ export const NarrationPlayer: Component<
     this.errorMessage = ''
 
     try {
-      const narration = await narrateTarget(this.name, this.type, this.category)
+      const narration = this.responseId
+        ? await narrateResponse(this.responseId)
+        : await narrateTarget(this.name ?? '', this.type ?? 'satellite', this.category)
       if (request !== latestRequest) {
         URL.revokeObjectURL(narration.audioUrl)
         return

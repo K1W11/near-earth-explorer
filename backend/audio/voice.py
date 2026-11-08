@@ -17,6 +17,7 @@ load_dotenv()
 API_URL = "https://api.elevenlabs.io/v1/text-to-speech"
 DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # "Rachel"; override with ELEVENLABS_VOICE_ID in .env
 DEFAULT_MODEL_ID = "eleven_multilingual_v2"
+APPLY_TEXT_NORMALIZATION = "on"
 OUTPUT_FORMAT = "mp3_44100_128"
 MAX_CHARS = 1200  # a 60-80 word story is ~450 chars; this guards against runaway credit spend
 
@@ -72,7 +73,11 @@ def narrate(text: str) -> Path:
                 f"{API_URL}/{voice_id}",
                 params={"output_format": OUTPUT_FORMAT},
                 headers={"xi-api-key": api_key},
-                json={"text": text, "model_id": model_id},
+                json={
+                    "text": text,
+                    "model_id": model_id,
+                    "apply_text_normalization": APPLY_TEXT_NORMALIZATION,
+                },
                 timeout=60,
             )
             r.raise_for_status()

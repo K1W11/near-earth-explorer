@@ -14,13 +14,13 @@ export type SatelliteOverview = {
   altitude_km: number | null
   orbit_class: string
   orbit_description: string
-  orbital_period_minutes: number
-  inclination_degrees: number
-  eccentricity: number
-  right_ascension_ascending_node_degrees: number
-  argument_of_perigee_degrees: number
-  mean_anomaly_degrees: number
-  mean_motion_revolutions_per_day: number
+  orbital_period_minutes: number | null
+  inclination_degrees: number | null
+  eccentricity: number | null
+  right_ascension_ascending_node_degrees: number | null
+  argument_of_perigee_degrees: number | null
+  mean_anomaly_degrees: number | null
+  mean_motion_revolutions_per_day: number | null
   revolutions_at_epoch: string
   tle1: string
   tle2: string
@@ -30,6 +30,7 @@ export type AssistantResponse = {
   query: string
   executed_tools: Array<{ name: string; args: Record<string, unknown>; result: unknown }>
   response: string
+  response_id: string
 }
 
 const apiBaseUrl = 'http://localhost:8000'
@@ -53,7 +54,9 @@ export async function askAssistant(query: string): Promise<AssistantResponse> {
     throw new Error(detail)
   }
   const payload: unknown = await response.json()
-  if (!payload || typeof payload !== 'object' || typeof (payload as { response?: unknown }).response !== 'string') {
+  if (!payload || typeof payload !== 'object'
+    || typeof (payload as { response?: unknown }).response !== 'string'
+    || typeof (payload as { response_id?: unknown }).response_id !== 'string') {
     throw new Error('Assistant response did not contain an answer')
   }
   return payload as AssistantResponse
@@ -109,6 +112,7 @@ export type Narration = {
   audioUrl: string
   /** The exact text that was spoken ('' if the backend didn't send it). */
   transcript: string
+  responseId: string
 }
 
 /** Turn a failed response into a readable message (the backend sends `{ detail }`). */
@@ -155,5 +159,27 @@ export async function narrateTarget(
   }
 
   const audioBlob = await response.blob()
-  return { audioUrl: URL.createObjectURL(audioBlob), transcript }
+  return {
+    audioUrl: URL.createObjectURL(audioBlob),
+    transcript,
+    responseId: response.headers.get('X-Response-ID') ?? '',
+  }
+}
+
+export async function narrateResponse(responseId: string): Promise<Narration> {
+  const response = await fetch(`${apiBaseUrl}/api/audio/narrate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ response_id: responseId }),
+  })
+  if (!response.ok) throw new Error(await narrationErrorMessage(response))
+  const header = response.headers.get('X-Narration-Text') ?? ''
+  let transcript = header
+  try { transcript = decodeURIComponent(header) } catch { /* use raw header */ }
+  const audioBlob = await response.blob()
+  return {
+    audioUrl: URL.createObjectURL(audioBlob),
+    transcript,
+    responseId,
+  }
 }

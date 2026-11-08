@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query
@@ -39,6 +40,21 @@ from satellite_messages import satellite_overview, format_satellite_message
 
 logger = logging.getLogger("near_earth_explorer")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+
+_altitude_cache: dict[tuple[str, str], float | None] = {}
+_MAX_ALTITUDE_CACHE_ENTRIES = 2_000
+_MIN_VALID_SATELLITE_ALTITUDE_KM = 80.0
+
+
+def _tool_result_fallback(result: dict[str, Any]) -> str:
+    """Render a useful answer if Gemini fails to synthesize after one tool round."""
+    nearest = result.get("nearest_satellite")
+    if isinstance(nearest, dict):
+        name = nearest.get("name")
+        altitude = nearest.get("altitude_km")
+        if isinstance(name, str) and isinstance(altitude, (int, float)):
+            return f"The nearest active satellite is {name}, at approximately {altitude:.1f} km altitude."
+    return "I found live telemetry, but Gemini could not summarize it. Please try again."
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 """Model used to understand astronomy questions and request structured tools."""
@@ -63,7 +79,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     # Lets browser JS read the narration transcript sent with the audio.
-    expose_headers=["X-Narration-Text"],
+    expose_headers=["X-Narration-Text", "X-Response-ID"],
 )
 
 
@@ -89,8 +105,9 @@ class NarrationRequest(BaseModel):
         object_type: Target kind, restricted to ``satellite`` or ``asteroid``.
     """
 
-    object_name: str = Field(min_length=1, max_length=200)
-    object_type: Literal["satellite", "asteroid"]
+    response_id: str | None = Field(default=None, min_length=16, max_length=200)
+    object_name: str | None = Field(default=None, min_length=1, max_length=200)
+    object_type: Literal["satellite", "asteroid"] | None = None
     category: Literal["overview", "orbital_position", "tracking"] = "overview"
 
 
@@ -121,16 +138,28 @@ class SatelliteOverview(BaseModel):
     altitude_km: float | None
     orbit_class: str
     orbit_description: str
-    orbital_period_minutes: float
-    inclination_degrees: float
-    eccentricity: float
-    right_ascension_ascending_node_degrees: float
-    argument_of_perigee_degrees: float
-    mean_anomaly_degrees: float
-    mean_motion_revolutions_per_day: float
+    orbital_period_minutes: float | None
+    inclination_degrees: float | None
+    eccentricity: float | None
+    right_ascension_ascending_node_degrees: float | None
+    argument_of_perigee_degrees: float | None
+    mean_anomaly_degrees: float | None
+    mean_motion_revolutions_per_day: float | None
     revolutions_at_epoch: str
     tle1: str
     tle2: str
+
+
+_assistant_responses: dict[str, str] = {}
+_MAX_ASSISTANT_RESPONSES = 256
+
+
+def _store_assistant_response(response: str) -> str:
+    response_id = secrets.token_urlsafe(24)
+    _assistant_responses[response_id] = response
+    if len(_assistant_responses) > _MAX_ASSISTANT_RESPONSES:
+        del _assistant_responses[next(iter(_assistant_responses))]
+    return response_id
 
 
 def _tool_declarations() -> list[types.Tool]:
@@ -172,11 +201,23 @@ def _tool_declarations() -> list[types.Tool]:
             required=["satellite_name"],
         ),
     )
+    nearest_satellite_declaration = types.FunctionDeclaration(
+        name="get_nearest_satellite",
+        description=(
+            "Find the active satellite currently closest to Earth by propagated "
+            "geocentric altitude."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={},
+        ),
+    )
     return [
         types.Tool(
             function_declarations=[
                 asteroid_declaration,
                 look_angles_declaration,
+                nearest_satellite_declaration,
             ]
         )
     ]
@@ -250,12 +291,35 @@ async def _execute_tool_call(
                 observer_lon=request.user_lon,
                 satellite_name=match["name"],
             )
-        except (KeyError, ValueError) as error:
+        except (KeyError, IndexError, OverflowError, ValueError) as error:
             logger.warning("Could not calculate look angles for %s: %s", satellite_name, error)
             return {
                 "error": "The selected satellite's TLE could not be propagated.",
                 "satellite_name": match.get("name", satellite_name),
             }
+
+    if tool_name == "get_nearest_satellite":
+        try:
+            satellites = await fetch_active_satellites()
+        except HTTPError as error:
+            raise HTTPException(
+                status_code=502,
+                detail="CelesTrak is temporarily unavailable.",
+            ) from error
+        nearest: dict[str, Any] | None = None
+        for satellite in satellites:
+            try:
+                altitude_km = calculate_altitude_km(satellite["tle1"], satellite["tle2"])
+            except (KeyError, ValueError):
+                continue
+            if altitude_km < _MIN_VALID_SATELLITE_ALTITUDE_KM:
+                continue
+            if nearest is None or altitude_km < nearest["altitude_km"]:
+                nearest = {
+                    "name": satellite["name"],
+                    "altitude_km": round(altitude_km, 1),
+                }
+        return {"nearest_satellite": nearest}
 
     # Tool names are limited to the declarations above; this guard ensures an
     # unexpected model response never dispatches arbitrary backend behavior.
@@ -265,7 +329,7 @@ async def _execute_tool_call(
 async def _generate_content(
     client: Any,
     contents: Any,
-    tools: list[types.Tool],
+    tools: list[types.Tool] | None,
 ) -> Any:
     """Call the synchronous Gemini SDK away from FastAPI's event-loop thread.
 
@@ -278,8 +342,7 @@ async def _generate_content(
         Gemini GenerateContentResponse, including text or requested function
         calls. Provider errors are surfaced to the calling route.
     """
-    config = types.GenerateContentConfig(
-        tools=tools,
+    config_kwargs: dict[str, Any] = dict(
         temperature=0.3,
         system_instruction=(
             "You are the Near Earth Explorer astronomy assistant. Use tools for "
@@ -287,6 +350,9 @@ async def _generate_content(
             "explain measured distances and sky directions in clear language."
         ),
     )
+    if tools:
+        config_kwargs["tools"] = tools
+    config = types.GenerateContentConfig(**config_kwargs)
     return await asyncio.to_thread(
         client.models.generate_content,
         model=GEMINI_MODEL,
@@ -350,14 +416,37 @@ async def active_satellites(
             detail="CelesTrak is temporarily unavailable.",
         ) from error
     selected = []
+    unavailable_count = 0
     for satellite in satellites[:limit]:
+        tle_key = (satellite["tle1"], satellite["tle2"])
+        if tle_key in _altitude_cache:
+            altitude_km = _altitude_cache[tle_key]
+            selected.append({**satellite, "altitude_km": altitude_km})
+            if altitude_km is None:
+                unavailable_count += 1
+            continue
         try:
             altitude_km = calculate_altitude_km(satellite["tle1"], satellite["tle2"])
         except ValueError as error:
-            logger.warning("Satellite %s has unavailable altitude: %s", satellite["name"], error)
-            selected.append({**satellite, "altitude_km": None})
-            continue
-        selected.append({**satellite, "altitude_km": round(altitude_km, 1)})
+            altitude_km = None
+            unavailable_count += 1
+            logger.debug(
+                "Satellite %s has unavailable altitude: %s",
+                satellite["name"],
+                error,
+            )
+        else:
+            altitude_km = round(altitude_km, 1)
+        _altitude_cache[tle_key] = altitude_km
+        if len(_altitude_cache) > _MAX_ALTITUDE_CACHE_ENTRIES:
+            del _altitude_cache[next(iter(_altitude_cache))]
+        selected.append({**satellite, "altitude_km": altitude_km})
+    if unavailable_count:
+        logger.info(
+            "Satellite altitude unavailable for %d of %d returned records",
+            unavailable_count,
+            len(selected),
+        )
     return ActiveSatellitesResponse(count=len(selected), satellites=selected)
 
 
@@ -372,11 +461,32 @@ async def satellite_overview_route(
             if satellite["name"].strip().casefold() == normalized_name:
                 try:
                     return SatelliteOverview(**satellite_overview(satellite))
-                except (KeyError, ValueError) as error:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="The selected satellite has invalid orbital data.",
-                    ) from error
+                except (KeyError, IndexError, OverflowError, ValueError) as error:
+                    logger.debug(
+                        "Satellite overview has unavailable derived data for %s: %s",
+                        name,
+                        type(error).__name__,
+                    )
+                    return SatelliteOverview(
+                        name=satellite.get("name", name),
+                        norad_catalog_number="No info",
+                        classification="No info",
+                        international_designator="No info",
+                        elements_epoch="No info",
+                        altitude_km=None,
+                        orbit_class="No info",
+                        orbit_description="Orbital data unavailable",
+                        orbital_period_minutes=None,
+                        inclination_degrees=None,
+                        eccentricity=None,
+                        right_ascension_ascending_node_degrees=None,
+                        argument_of_perigee_degrees=None,
+                        mean_anomaly_degrees=None,
+                        mean_motion_revolutions_per_day=None,
+                        revolutions_at_epoch="No info",
+                        tle1=satellite.get("tle1", ""),
+                        tle2=satellite.get("tle2", ""),
+                    )
         raise HTTPException(status_code=404, detail=f"No active satellite matched '{name}'")
 
 
@@ -451,10 +561,12 @@ async def assistant_query(request: QueryRequest) -> dict[str, Any]:
                     status_code=502,
                     detail="Gemini returned no text answer.",
                 )
+            response_id = _store_assistant_response(answer)
             return {
                 "query": request.query,
                 "executed_tools": executed_tools,
                 "response": answer,
+                "response_id": response_id,
             }
 
         candidate = (
@@ -490,22 +602,25 @@ async def assistant_query(request: QueryRequest) -> dict[str, Any]:
             candidate.content,
             types.Content(role="user", parts=function_response_parts),
         ]
-        final_response = await _generate_content(client, second_contents, tools)
+        # Tool execution is deliberately limited to one round trip. Omitting
+        # declarations here prevents Gemini from requesting a second turn.
+        final_response = await _generate_content(client, second_contents, None)
         if final_response.function_calls:
-            raise HTTPException(
-                status_code=502,
-                detail="Gemini requested more than one tool-call turn.",
-            )
+            logger.warning("Gemini requested another tool turn; using the first tool results.")
         answer = final_response.text
+        if not answer and final_response.function_calls and executed_tools:
+            answer = _tool_result_fallback(executed_tools[-1]["result"])
         if not answer:
             raise HTTPException(
                 status_code=502,
                 detail="Gemini returned no synthesized answer after tool execution.",
             )
+        response_id = _store_assistant_response(answer)
         return {
             "query": request.query,
             "executed_tools": executed_tools,
             "response": answer,
+            "response_id": response_id,
         }
     except HTTPException:
         raise
@@ -538,7 +653,13 @@ async def narrate_target(request: NarrationRequest) -> FileResponse:
     offline. If facts or Gemini are unavailable a generic sentence is narrated
     instead. Provider failures return a JSON 502 *before* any audio is sent.
     """
-    if request.object_type == "satellite":
+    if request.response_id is not None:
+        narration = _assistant_responses.get(request.response_id)
+        if narration is None:
+            raise HTTPException(status_code=404, detail="Assistant response was not found or has expired.")
+    elif request.object_name is None or request.object_type is None:
+        raise HTTPException(status_code=422, detail="Provide response_id or a backend-derived narration target.")
+    elif request.object_type == "satellite":
         satellites = await fetch_active_satellites()
         normalized_name = request.object_name.strip().casefold()
         satellite = next(
@@ -574,7 +695,10 @@ async def narrate_target(request: NarrationRequest) -> FileResponse:
     return FileResponse(
         path,
         media_type="audio/mpeg",
-        headers={"X-Narration-Text": quote(narration)},
+        headers={
+            "X-Narration-Text": quote(narration),
+            "X-Response-ID": request.response_id or "",
+        },
     )
 
 

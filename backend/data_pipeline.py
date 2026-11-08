@@ -32,6 +32,9 @@ import httpx
 CACHE_TTL = 3600
 """Maximum age, in seconds, for any cached NASA or CelesTrak payload."""
 
+UPSTREAM_TIMEOUT = 10.0
+"""Maximum time, in seconds, to wait for one external feed request."""
+
 NASA_FEED_URL = "https://api.nasa.gov/neo/rest/v1/feed"
 """NASA NeoWs close-approach feed endpoint."""
 
@@ -188,7 +191,7 @@ async def fetch_asteroids(nasa_api_key: str = "DEMO_KEY") -> List[Dict[str, Any]
             "start_date": today_str,
             "api_key": nasa_api_key,
         }
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT) as client:
             response = await client.get(NASA_FEED_URL, params=params)
             response.raise_for_status()
             payload = response.json()
@@ -273,11 +276,19 @@ async def fetch_active_satellites() -> List[Dict[str, str]]:
                 "AppleWebKit/537.36 Chrome/131.0 Safari/537.36"
             ),
         }
-        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
-            response = await client.get(CELESTRAK_ACTIVE_TLE_URL)
-            if response.status_code == 403:
+        async with httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT, headers=headers) as client:
+            try:
+                response = await client.get(CELESTRAK_ACTIVE_TLE_URL)
+                response.raise_for_status()
+            except httpx.HTTPError as error:
+                status_code = (
+                    error.response.status_code
+                    if isinstance(error, httpx.HTTPStatusError) and error.response
+                    else "request error"
+                )
                 logger.warning(
-                    "CelesTrak active feed returned 403; using SatNOGS alive-satellite fallback"
+                    "CelesTrak active feed failed (%s); using SatNOGS fallback",
+                    status_code,
                 )
                 fallback_response = await client.get(
                     SATNOGS_ACTIVE_TLE_URL,
@@ -285,7 +296,6 @@ async def fetch_active_satellites() -> List[Dict[str, str]]:
                 )
                 fallback_response.raise_for_status()
                 return _parse_satnogs_satellites(fallback_response.json())
-            response.raise_for_status()
             document = response.text
         return _parse_active_satellites(document)
 

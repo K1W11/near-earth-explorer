@@ -62,7 +62,7 @@ NarrationLog.style = css`
   :scope .narration-log-list::-webkit-scrollbar { display: none; }
   :scope article {
     position: relative;
-    padding: 12px 34px 12px 14px;
+    padding: 16px;
     border: 1px solid rgb(255 255 255 / 25%);
     border-radius: 6px;
     background: rgb(0 0 0 / 82%);

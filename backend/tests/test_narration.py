@@ -42,6 +42,14 @@ def story_sources(mock_elevenlabs_client):
 def spoken_text(provider_post) -> str:
     return provider_post.call_args.kwargs["json"]["text"]
 
+def test_elevenlabs_enables_text_normalization(mock_elevenlabs_client):
+    """Send numeric narration through ElevenLabs text normalization."""
+    import audio.voice
+
+    audio.voice.narrate("Orbit 2009 JR5 at 12,345 kilometers.")
+    payload = mock_elevenlabs_client.call_args.kwargs["json"]
+    assert payload["apply_text_normalization"] == "on"
+
 
 @pytest.mark.asyncio
 async def test_narrates_gemini_story_and_returns_transcript(async_test_client, mock_elevenlabs_client):

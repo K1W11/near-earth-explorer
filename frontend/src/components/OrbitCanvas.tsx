@@ -120,7 +120,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
   this.speed = 8
   this.hoveredSatellite = -1
   this.selectedSatellite = null
-  this.trayOpen = true
+  this.trayOpen = false
   let addNarrationNotification = (_message: string, _error?: boolean, _stop?: () => void) => {}
 
   this.cx.mount = () => {
@@ -405,7 +405,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
 
     const loadSatellites = async () => {
       try {
-        const response = await fetchActiveSatellites(100)
+        const response = await fetchActiveSatellites(500)
         if (canvas.isConnected) {
           this.satellites = response.satellites
           this.status = 'ready'
@@ -448,7 +448,10 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
           />
         </div>
         <div class="conversation-column">
-          <PromptDock selectedSatellite={use(this.selectedSatellite)} />
+          <PromptDock
+            selectedSatellite={use(this.selectedSatellite)}
+            onNarration={(message, error, stop) => addNarrationNotification(message, error, stop)}
+          />
         </div>
         <NarrationLog onReady={(add) => { addNarrationNotification = add }} />
       </div>
@@ -493,6 +496,7 @@ OrbitCanvas.style = css`
   }
 
   :scope .conversation-column {
+    pointer-events: none;
     display: flex;
     flex: 1 1 0;
     min-width: 0;

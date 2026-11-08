@@ -198,13 +198,15 @@ export interface components {
          *         object_type: Target kind, restricted to ``satellite`` or ``asteroid``.
          */
         NarrationRequest: {
+            /** Backend-issued assistant response ID. */
+            response_id?: string;
             /** Object Name */
-            object_name: string;
+            object_name?: string;
             /**
              * Object Type
              * @enum {string}
              */
-            object_type: "satellite" | "asteroid";
+            object_type?: "satellite" | "asteroid";
             /** Narration category for structured satellite speech. */
             category?: "overview" | "orbital_position" | "tracking";
         };

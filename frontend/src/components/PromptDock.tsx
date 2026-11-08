@@ -4,9 +4,12 @@ import arrowDownIcon from 'iconoir/icons/regular/nav-arrow-down.svg?raw'
 import arrowUpIcon from 'iconoir/icons/regular/nav-arrow-up.svg?raw'
 import { askAssistant, type Satellite } from '../api/backend'
 import { IconoirIcon } from './IconoirIcon'
+import { MarkdownContent } from './MarkdownContent'
+import { NarrationPlayer } from './NarrationPlayer'
 
 type PromptDockProps = {
   selectedSatellite: Satellite | null
+  onNarration?: (message: string, error?: boolean, stop?: () => void) => void
 }
 
 type ConversationEntry = {
@@ -14,6 +17,13 @@ type ConversationEntry = {
   query: string
   response: string
   error: boolean
+  responseId?: string
+}
+
+declare global {
+  interface Window {
+    populateDummyConversation?: (count?: number) => void
+  }
 }
 
 export const PromptDock: Component<PromptDockProps, {
@@ -30,23 +40,68 @@ export const PromptDock: Component<PromptDockProps, {
   this.conversationElement = null
   this.conversationList = null
   this.conversations = []
-  this.conversationOpen = true
+  this.conversationOpen = false
   this.conversationAtBottom = true
   this.status = 'idle'
   this.errorMessage = ''
   let nextConversationId = 0
-  const scrollConversationToEnd = () => {
-    queueMicrotask(() => {
-      const list = this.conversationList
-      if (list) {
-        list.scrollTop = list.scrollHeight
-        this.conversationAtBottom = true
-      }
+  const scrollConversationToEnd = (behavior: ScrollBehavior = 'smooth') => {
+    const list = this.conversationList
+    if (!list) return
+    list.scrollTo({ top: list.scrollHeight, behavior })
+    this.conversationAtBottom = true
+  }
+  const scheduleScrollToEnd = () => {
+    this.conversationAtBottom = true
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollConversationToEnd())
+    })
+  }
+  const openConversation = () => {
+    if (this.conversationOpen) {
+      scheduleScrollToEnd()
+      return
+    }
+    this.conversationOpen = false
+    requestAnimationFrame(() => {
+      this.conversationOpen = true
+      scheduleScrollToEnd()
     })
   }
   const updateConversationScroll = (event: Event) => {
     const list = event.currentTarget as HTMLElement
     this.conversationAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 8
+  }
+  const resizePrompt = (textarea: HTMLTextAreaElement) => {
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`
+    textarea.style.overflowY = textarea.scrollHeight > 180 ? 'auto' : 'hidden'
+  }
+  const handlePromptKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Enter' || event.shiftKey) return
+    event.preventDefault()
+    const textarea = event.currentTarget as HTMLTextAreaElement
+    textarea.form?.requestSubmit()
+  }
+  this.cx.mount = () => {
+    use(this.selectedSatellite).listen(() => {
+      this.conversations = []
+      this.conversationOpen = false
+      this.conversationAtBottom = true
+      this.status = 'idle'
+      this.errorMessage = ''
+      if (this.textarea) this.textarea.value = ''
+    })
+    window.populateDummyConversation = (count = 12) => {
+      const entries = Array.from({ length: Math.max(1, Math.min(100, count)) }, (_, index) => ({
+        id: nextConversationId++,
+        query: `Test question ${index + 1}: how does this simulated orbital record change over time?`,
+        response: `### Dummy response ${index + 1}\n\nThis is local test data for scrolling. It includes **bold text**, a list, and a [link](https://example.com) without making a Gemini request.\n\n- Orbital position\n- Tracking status`,
+        error: false,
+      }))
+      this.conversations = [...this.conversations, ...entries]
+      openConversation()
+    }
   }
 
   const submit = async (event: SubmitEvent) => {
@@ -59,19 +114,23 @@ export const PromptDock: Component<PromptDockProps, {
       ? `Regarding the satellite ${satellite.name}: ${query}`
       : query
     const conversationId = nextConversationId++
+    const conversationWasOpen = this.conversationOpen
     this.conversations = [
       ...this.conversations,
       { id: conversationId, query, response: '', error: false },
     ]
-    scrollConversationToEnd()
+    if (conversationWasOpen) scheduleScrollToEnd()
+    else openConversation()
     this.status = 'loading'
     this.errorMessage = ''
     try {
       const result = await askAssistant(contextualQuery)
       this.conversations = this.conversations.map((entry) => (
-        entry.id === conversationId ? { ...entry, response: result.response } : entry
+        entry.id === conversationId
+          ? { ...entry, response: result.response, responseId: result.response_id }
+          : entry
       ))
-      scrollConversationToEnd()
+      scheduleScrollToEnd()
       this.status = 'idle'
       if (this.textarea) this.textarea.value = ''
     } catch (error: unknown) {
@@ -82,28 +141,56 @@ export const PromptDock: Component<PromptDockProps, {
           ? { ...entry, response: this.errorMessage, error: true }
           : entry
       ))
-      scrollConversationToEnd()
+      scheduleScrollToEnd()
     }
   }
 
   return (
-    <div class="prompt-stack">
-      {use(this.conversations).map((entries) => use(this.conversationOpen).map((open) => entries.length > 0 && open
+    <div class={use`prompt-stack ${use(this.conversationOpen).map((open) => open ? 'is-conversation-open' : 'is-conversation-closed')}`}>
+      {use(this.conversations).map((entries) => entries.length > 0
         ? (
-          <section class="conversation-log" this={use(this.conversationElement)} aria-live="polite">
-            <div class="conversation-list" this={use(this.conversationList)} on:scroll={updateConversationScroll}>
-              {entries.map((entry) => (
-                <article class={entry.error ? 'is-error' : ''}>
-                  <p class="conversation-query">{entry.query}</p>
-                  <p class="conversation-response">
-                    {entry.response || 'Gemini is thinking...'}
-                  </p>
-                </article>
+          <section class={use`conversation-log ${use(this.conversationOpen).map((open) => open ? 'is-open' : 'is-closed')}`} this={use(this.conversationElement)} aria-live="polite">
+            <div class="conversation-log-content">
+              <div class="conversation-list" this={use(this.conversationList)} on:scroll={updateConversationScroll}>
+                {entries.map((entry) => (
+                  <article class={entry.error ? 'is-error' : ''}>
+                    <p class="conversation-query">{entry.query}</p>
+                    {entry.response
+                      ? (
+                        <div class="conversation-response">
+                          <MarkdownContent content={entry.response} />
+                          {entry.responseId
+                            ? (
+                              <div class="response-narration">
+                                <NarrationPlayer
+                                  responseId={entry.responseId}
+                                  compact
+                                  onNotification={this.onNarration}
+                                />
+                              </div>
+                            )
+                            : null}
+                        </div>
+                      )
+                      : <p class="conversation-response">Gemini is thinking...</p>}
+                  </article>
+                ))}
+              </div>
+              {use(this.conversationAtBottom).map((atBottom) => atBottom ? null : (
+                <button
+                  type="button"
+                  class="conversation-bottom"
+                  aria-label="Scroll to newest conversation entry"
+                  title="Scroll to newest"
+                  on:click={scrollConversationToEnd}
+                >
+                  <IconoirIcon svg={arrowDownIcon} />
+                </button>
               ))}
             </div>
           </section>
         )
-        : null))}
+        : null)}
       <form class="prompt-dock" on:submit={submit}>
         <header>
           <strong>{use(this.selectedSatellite).map((satellite) => satellite ? satellite.name : 'Satellite explorer')}</strong>
@@ -113,17 +200,6 @@ export const PromptDock: Component<PromptDockProps, {
           {use(this.conversations).map((entries) => use(this.conversationOpen).map((open) => entries.length > 0
             ? (
               <div class="conversation-actions">
-                {open && use(this.conversationAtBottom).map((atBottom) => atBottom ? null : (
-                  <button
-                    type="button"
-                    class="conversation-bottom"
-                    aria-label="Scroll to newest conversation entry"
-                    title="Scroll to newest"
-                    on:click={scrollConversationToEnd}
-                  >
-                    <IconoirIcon svg={arrowDownIcon} />
-                  </button>
-                ))}
                 <button
                   type="button"
                   class="conversation-toggle"
@@ -131,7 +207,7 @@ export const PromptDock: Component<PromptDockProps, {
                   title={open ? 'Close conversation' : 'Open conversation'}
                   on:click={() => {
                     this.conversationOpen = !open
-                    if (!open) scrollConversationToEnd()
+                    if (!open) scheduleScrollToEnd()
                   }}
                 >
                   <IconoirIcon svg={open ? arrowDownIcon : arrowUpIcon} />
@@ -147,6 +223,8 @@ export const PromptDock: Component<PromptDockProps, {
             rows="1"
             placeholder="Ask a question about this view..."
             aria-label="Ask Gemini about the satellites"
+            on:input={(event: Event) => resizePrompt(event.currentTarget as HTMLTextAreaElement)}
+            on:keydown={handlePromptKeyDown}
           ></textarea>
           <button
             type="submit"
@@ -175,27 +253,58 @@ PromptDock.style = css`
     min-width: 0;
     min-height: 0;
     gap: var(--layout-gap);
+    padding-top: calc(32px + var(--layout-gap));
+    box-sizing: border-box;
+    pointer-events: none;
   }
 
   :scope .conversation-log {
-    display: flex;
-    flex-direction: column;
-    flex: 0 1 min(360px, calc(100% - 48px));
+    position: relative;
+    display: block;
+    flex: 0 1 auto;
     min-height: 0;
     margin-top: auto;
     width: 100%;
+    max-height: min(70vh, calc(100% - 48px));
     overflow: hidden;
     border: 1px solid rgb(255 255 255 / 25%);
     border-radius: 6px;
     background: rgb(0 0 0 / 78%);
     box-shadow: 4px 8px 20px rgb(0 0 0 / 30%);
     color: rgb(255 255 255 / 85%);
+    pointer-events: auto;
+    transform-origin: bottom center;
+    transition: max-height 220ms ease, opacity 220ms ease, transform 220ms ease;
+  }
+
+  :scope .conversation-log.is-open {
+    max-height: min(70vh, calc(100% - 48px));
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  :scope .conversation-log.is-closed {
+    max-height: 0;
+    min-height: 0;
+    margin-top: 0;
+    border-color: transparent;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
+  }
+
+  :scope .conversation-log-content {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
   }
 
   :scope .conversation-actions {
     position: absolute;
-    top: 8px;
-    right: 10px;
+    top: 0;
+    right: 0;
     display: flex;
     gap: 4px;
     align-items: center;
@@ -211,11 +320,19 @@ PromptDock.style = css`
     width: 24px;
     height: 24px;
     padding: 0;
-    border: 0;
-    background: transparent;
+    border: 1px solid rgb(255 255 255 / 25%);
+    border-radius: 4px;
+    background: rgb(0 0 0 / 72%);
     color: white;
     line-height: 1;
     cursor: pointer;
+  }
+
+  :scope .conversation-bottom {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    z-index: 1;
   }
 
   :scope .conversation-toggle svg,
@@ -226,11 +343,14 @@ PromptDock.style = css`
 
   :scope .conversation-list {
     display: grid;
+    flex: 0 1 auto;
     gap: 12px;
     width: 100%;
-    padding: 12px 14px;
+    padding: 16px;
     overflow-y: auto;
     scrollbar-width: none;
+    min-height: 0;
+    max-height: 100%;
   }
 
   :scope .conversation-list::-webkit-scrollbar {
@@ -263,23 +383,45 @@ PromptDock.style = css`
     white-space: pre-wrap;
   }
 
+  :scope .response-narration {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  :scope .response-narration .narration-transcript {
+    flex: 1 1 100%;
+    padding-left: 8px;
+    color: rgb(255 255 255 / 62%);
+    font-style: italic;
+  }
+
   :scope .conversation-list article.is-error .conversation-response {
     color: #ff9d9d;
   }
 
   :scope .prompt-dock {
+    pointer-events: auto;
+    flex: none;
+    height: fit-content;
+    max-height: max-content;
+    min-height: 0;
     width: 100%;
     max-width: none;
     align-self: end;
-    display: grid;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     gap: 6px;
     box-sizing: border-box;
-    padding: 12px 14px;
+    padding: 16px;
     border: 1px solid rgb(255 255 255 / 25%);
     border-radius: 6px;
     background: rgb(0 0 0 / 78%);
     box-shadow: 4px 8px 20px rgb(0 0 0 / 30%);
     color: rgb(255 255 255 / 85%);
+    pointer-events: auto;
   }
 
   :scope header {
@@ -301,12 +443,18 @@ PromptDock.style = css`
 
   :scope .prompt-row {
     display: flex;
+    flex: 0 0 auto;
     gap: 8px;
+    align-items: stretch;
   }
 
   :scope textarea {
     flex: 1;
     min-width: 0;
+    min-height: 34px;
+    max-height: 180px;
+    height: 34px;
+    box-sizing: border-box;
     resize: none;
     padding: 8px 10px;
     border: 1px solid rgb(255 255 255 / 25%);

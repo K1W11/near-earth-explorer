@@ -9,19 +9,25 @@ type SelectionTrayProps = {
   onNarration: (message: string, error?: boolean, stop?: () => void) => void
 }
 
-const formatDegrees = (value: number) => `${value.toFixed(2)}°`
-const formatDuration = (minutes: number) => (
+const formatDegrees = (value: number | null) => value === null ? 'No info' : `${value.toFixed(2)}°`
+const formatDuration = (minutes: number | null) => minutes === null ? 'No info' : (
   minutes >= 60
     ? `${Math.floor(minutes / 60)} h ${Math.round(minutes % 60)} min`
     : `${minutes.toFixed(1)} min`
 )
-export const SelectionTray: Component<SelectionTrayProps, { overview: SatelliteOverview | null }> = function () {
+export const SelectionTray: Component<SelectionTrayProps, { overview: SatelliteOverview | null; overviewFailed: boolean }> = function () {
   this.overview = null as SatelliteOverview | null
+  this.overviewFailed = false
   use(this.selectedSatellite).listen((satellite) => {
     this.overview = null
+    this.overviewFailed = false
     if (satellite) {
       void fetchSatelliteOverview(satellite.name).then((overview) => {
         if (this.selectedSatellite?.name === satellite.name) this.overview = overview
+      }).catch((error: unknown) => {
+        if (this.selectedSatellite?.name !== satellite.name) return
+        this.overviewFailed = true
+        console.warn('Satellite overview unavailable', error)
       })
     }
   })
@@ -41,7 +47,10 @@ export const SelectionTray: Component<SelectionTrayProps, { overview: SatelliteO
                   <span>{overview.orbit_class} · {overview.orbit_description}</span>
                 </header>
                 <section class="satellite-details">
-                  <h3>Overview <NarrationPlayer name={satellite.name} type="satellite" category="overview" compact onNotification={this.onNarration} /></h3>
+                  <div class="category-heading">
+                    <h3>Overview</h3>
+                    <NarrationPlayer name={satellite.name} type="satellite" category="overview" compact onNotification={this.onNarration} />
+                  </div>
                   <dl>
                     <dt>Altitude</dt>
                     <dd>{overview.altitude_km === null ? 'No info' : `${overview.altitude_km.toLocaleString(undefined, { maximumFractionDigits: 1 })} km`}</dd>
@@ -52,11 +61,14 @@ export const SelectionTray: Component<SelectionTrayProps, { overview: SatelliteO
                     <dt>Inclination</dt>
                     <dd>{formatDegrees(overview.inclination_degrees)} from the equator</dd>
                     <dt>Eccentricity</dt>
-                    <dd>{overview.eccentricity.toFixed(7)} · {overview.eccentricity < 0.01 ? 'nearly circular' : 'elliptical'}</dd>
+                    <dd>{overview.eccentricity === null ? 'No info' : `${overview.eccentricity.toFixed(7)} · ${overview.eccentricity < 0.01 ? 'nearly circular' : 'elliptical'}`}</dd>
                   </dl>
                 </section>
                 <section class="satellite-details">
-                    <h3>Orbital position <NarrationPlayer name={satellite.name} type="satellite" category="orbital_position" compact onNotification={this.onNarration} /></h3>
+                    <div class="category-heading">
+                      <h3>Orbital position</h3>
+                      <NarrationPlayer name={satellite.name} type="satellite" category="orbital_position" compact onNotification={this.onNarration} />
+                    </div>
                     <dl>
                       <dt>Right ascension of ascending node</dt>
                       <dd>{formatDegrees(overview.right_ascension_ascending_node_degrees)}</dd>
@@ -65,11 +77,12 @@ export const SelectionTray: Component<SelectionTrayProps, { overview: SatelliteO
                       <dt>Mean anomaly</dt>
                       <dd>{formatDegrees(overview.mean_anomaly_degrees)}</dd>
                       <dt>Mean motion</dt>
-                      <dd>{overview.mean_motion_revolutions_per_day.toFixed(8)} revolutions/day</dd>
+                      <dd>{overview.mean_motion_revolutions_per_day === null ? 'No info' : `${overview.mean_motion_revolutions_per_day.toFixed(8)} revolutions/day`}</dd>
                     </dl>
                   </section>
                 <details>
-                    <summary>Tracking record <NarrationPlayer name={satellite.name} type="satellite" category="tracking" compact onNotification={this.onNarration} /></summary>
+                      <summary>Tracking record</summary>
+                      <NarrationPlayer name={satellite.name} type="satellite" category="tracking" compact onNotification={this.onNarration} />
                     <dl>
                       <dt>NORAD catalog number</dt>
                       <dd>{overview.norad_catalog_number} ({overview.classification})</dd>
@@ -88,7 +101,9 @@ export const SelectionTray: Component<SelectionTrayProps, { overview: SatelliteO
                 </details>
               </article>
               )
-              : <p class="tray-empty">Loading satellite overview...</p>
+              : use(this.overviewFailed).map((failed) => (
+                <p class="tray-empty">{failed ? 'Satellite details unavailable' : 'Loading satellite overview...'}</p>
+              ))
             )
           : <p class="tray-empty">No satellite selected</p>
         )}
@@ -99,18 +114,21 @@ export const SelectionTray: Component<SelectionTrayProps, { overview: SatelliteO
 
 SelectionTray.style = css`
   :scope {
-    flex: 1 1 0;
-    height: auto;
-    align-self: stretch;
-    z-index: 2;
     display: flex;
-    width: 320px;
+    flex: 1 1 auto;
+    flex-direction: row;
+    align-self: stretch;
+    width: 100%;
     max-width: 85vw;
     min-height: 0;
-    transition: width 180ms ease;
+    overflow: hidden;
     border: 1px solid rgb(255 255 255 / 25%);
     border-left: 0;
     border-radius: 0 6px 6px 0;
+    background: rgb(0 0 0 / 78%);
+    box-shadow: 4px 8px 20px rgb(0 0 0 / 30%);
+    transition: width 180ms ease;
+    z-index: 2;
   }
 
   :scope.is-closed {
@@ -119,113 +137,139 @@ SelectionTray.style = css`
   }
 
   :scope .tray-content {
-    flex: 1;
-    display: grid;
-    gap: var(--layout-gap);
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
     overflow-y: auto;
-    padding: 16px;
-    padding-left: 0;
-    
-    background: rgb(0 0 0 / 78%);
-    box-shadow: 4px 8px 20px rgb(0 0 0 / 30%);
+    padding: 16px 0 16px 16px;
+    scrollbar-width: none;
+  }
+
+  :scope .tray-content::-webkit-scrollbar {
+    display: none;
   }
 
   :scope.is-closed .tray-content {
     display: none;
   }
 
-  :scope.is-closed .tray-toggle {
-    pointer-events: auto;
-  }
-
   :scope .tray-toggle {
+    order: 2;
+    flex: 0 0 24px;
     align-self: center;
     width: 24px;
     height: 56px;
     padding: 0;
     border: 0;
-    background: rgb(0 0 0 / 78%);
     color: white;
     cursor: pointer;
+    background: transparent;
+    pointer-events: auto;
   }
 
   :scope .selected-satellite {
-    display: grid;
-    gap: 14px;
-    padding-left: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--layout-gap);
+    min-height: 100%;
+    padding: 0 16px 0 8px;
     border-left: 3px solid #62d9ff;
   }
 
   :scope .selected-satellite header,
   :scope .satellite-details {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 5px;
   }
 
   :scope .selected-satellite header span,
   :scope .satellite-details h3,
   :scope .satellite-details dt,
-  :scope .selected-satellite details dt,
+  :scope details dt,
   :scope .tray-empty {
     color: rgb(255 255 255 / 70%);
     font-size: 11px;
   }
 
-  :scope .satellite-details h3 {
+  :scope .selected-satellite header strong {
+    color: rgb(255 255 255 / 90%);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+  }
+
+  :scope .category-heading {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 8px;
+    min-height: 32px;
+  }
+
+  :scope .category-heading h3 {
     margin: 0;
-    color: rgb(255 255 255 / 90%);
     font-size: 12px;
+    color: rgb(255 255 255 / 90%);
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
 
-  :scope .satellite-details h3 .narration-player,
   :scope summary .narration-player {
+    display: none;
+  }
+
+  :scope .category-heading .narration-player,
+  :scope details > .narration-player {
+    margin-left: auto;
     flex: 0 0 auto;
   }
 
   :scope summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    min-height: 32px;
+    padding: 8px 32px 8px 2px;
+    box-sizing: border-box;
+    color: rgb(255 255 255 / 90%);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    line-height: 1.3;
+    text-transform: uppercase;
+    cursor: pointer;
   }
 
   :scope .satellite-details dl,
-  :scope .selected-satellite details dl {
+  :scope details dl {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 5px 10px;
+    gap: 6px 10px;
     margin: 0;
   }
 
   :scope .satellite-details dd,
-  :scope .selected-satellite details dd {
+  :scope details dd {
     margin: 0;
     text-align: right;
     font-size: 11px;
   }
 
-  :scope .selected-satellite details {
-    display: grid;
-    gap: 8px;
+  :scope details {
+    position: relative;
+    min-width: 0;
   }
 
-  :scope summary {
-    margin-bottom: 2px;
-    color: rgb(255 255 255 / 82%);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    cursor: pointer;
+  :scope summary::marker {
+    color: rgb(255 255 255 / 70%);
   }
 
-  :scope .selected-satellite code {
+  :scope details > .narration-player {
+    position: absolute;
+    top: 4px;
+    right: 0;
+  }
+
+  :scope details code {
     display: block;
     overflow-wrap: anywhere;
+    margin-top: 6px;
     color: rgb(255 255 255 / 58%);
     font: 10px/1.35 ui-monospace, monospace;
   }
