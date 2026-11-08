@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_URL = "https://api.elevenlabs.io/v1/text-to-speech"
-DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"  # voice used in ElevenLabs' docs example; override in .env
+DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # "Rachel"; override with ELEVENLABS_VOICE_ID in .env
 DEFAULT_MODEL_ID = "eleven_multilingual_v2"
 OUTPUT_FORMAT = "mp3_44100_128"
 MAX_CHARS = 1200  # a 60-80 word story is ~450 chars; this guards against runaway credit spend
@@ -54,10 +54,12 @@ def narrate(text: str) -> Path:
     if len(text) > MAX_CHARS:
         raise AudioError(f"Text too long ({len(text)} > {MAX_CHARS} chars)")
 
-    api_key, voice_id, model_id = _settings()
+    voice_id = os.getenv("ELEVENLABS_VOICE_ID", DEFAULT_VOICE_ID)
+    model_id = os.getenv("ELEVENLABS_MODEL_ID", DEFAULT_MODEL_ID)
     path = cache_path(text, voice_id, model_id)
-    if path.exists():
+    if path.exists():  # cache hits must work with no API key / no internet (offline demo)
         return path
+    api_key = _settings()[0]
 
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     with _locks_guard:

@@ -5,8 +5,7 @@ Architectural responsibilities:
   CelesTrak active satellite TLEs, and observer-centered satellite look angles.
 * Orchestrate Gemini 2.5 Flash structured function calls by connecting model
   requests to the shared data pipeline and SGP4 look-angle calculation engine.
-* Stream ElevenLabs MP3 narration to the map UI without buffering the complete
-  audio response in application memory.
+* Serve cached ElevenLabs MP3 narration (see ``audio/``) to the map UI.
 
 The route layer depends on ``data_pipeline.py`` for cached external data and
 ``look_angles.py`` for TLE propagation and local horizon calculations. Copy
@@ -19,18 +18,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Iterator
 from typing import Any, Literal
 
-from elevenlabs import ElevenLabs
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse
 from google.genai import types
 from httpx import HTTPError
 from pydantic import BaseModel, Field
 
 from data_pipeline import fetch_active_satellites, fetch_asteroids
+from audio import AudioError, narrate
 from gemini_client import GeminiConfigurationError, get_gemini_client
 from look_angles import calculate_altitude_km, calculate_look_angles
 
@@ -39,12 +37,6 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
 GEMINI_MODEL = "gemini-2.5-flash"
 """Model used to understand astronomy questions and request structured tools."""
-
-RACHEL_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
-"""ElevenLabs voice ID for the voice named Rachel."""
-
-ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
-"""Model used to generate narration for a selected satellite or asteroid."""
 
 app = FastAPI(
     title="Near Earth Explorer Backend",
@@ -479,60 +471,31 @@ async def assistant_query(request: QueryRequest) -> dict[str, Any]:
         ) from error
 
 
-def _audio_chunks(
-    api_key: str,
-    narration: str,
-) -> Iterator[bytes]:
-    """Yield streamed MP3 bytes from ElevenLabs for the narration response.
-
-    The ElevenLabs SDK's ``text_to_speech.stream`` operation is itself the
-    streaming API; consuming its iterator yields audio chunks as they arrive.
-    The synchronous generator is adapted by FastAPI/Starlette's streaming
-    response so the complete audio is never accumulated in memory.
-    """
-    client = ElevenLabs(api_key=api_key)
-    try:
-        yield from client.text_to_speech.stream(
-            text=narration,
-            voice_id=RACHEL_VOICE_ID,
-            model_id=ELEVENLABS_MODEL,
-            output_format="mp3_44100_128",
-        )
-    except Exception:
-        # Streaming headers have already been sent when iteration begins, so a
-        # provider failure cannot become a normal JSON error response.
-        logger.exception("ElevenLabs narration stream failed")
-        raise
-
-
 @app.post("/api/audio/narrate")
-async def narrate_target(request: NarrationRequest) -> StreamingResponse:
-    """Stream an ElevenLabs narration for the selected asteroid or satellite.
+def narrate_target(request: NarrationRequest) -> FileResponse:
+    """Return an ElevenLabs narration for the selected asteroid or satellite.
 
     Request JSON schema:
         ``object_name``: Map target name.
         ``object_type``: ``satellite`` or ``asteroid``.
 
-    Response is an ``audio/mpeg`` byte stream. The narration is exactly the
-    target introduction requested by the product flow and uses the Rachel voice
-    with the configured ElevenLabs model.
+    Response is an ``audio/mpeg`` file. Audio is generated once per distinct
+    text by ``audio.narrate`` and then served from the on-disk cache, so repeat
+    requests cost no ElevenLabs credits and work offline. Failures are reported
+    as a JSON 502 *before* any audio is sent, so the frontend can tell an error
+    from a successful (empty) response. This is a plain ``def`` route so the
+    blocking provider call runs in FastAPI's threadpool, not on the event loop.
     """
-    api_key = os.getenv("ELEVENLABS_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="ELEVENLABS_API_KEY is not configured.",
-        )
-
     narration = (
         f"Now targeting {request.object_name}. This space target is actively "
         "monitored by Near Earth Explorer."
     )
-    return StreamingResponse(
-        _audio_chunks(api_key, narration),
-        media_type="audio/mpeg",
-        headers={"Cache-Control": "no-store"},
-    )
+    try:
+        path = narrate(narration)
+    except AudioError as error:
+        logger.error("Narration failed for %s: %s", request.object_name, error)
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return FileResponse(path, media_type="audio/mpeg")
 
 
 if __name__ == "__main__":
