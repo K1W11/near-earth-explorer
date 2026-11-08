@@ -22,22 +22,17 @@ import os
 from collections.abc import Iterator
 from typing import Any, Literal
 
-from dotenv import load_dotenv
 from elevenlabs import ElevenLabs
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from google import genai
 from google.genai import types
 from httpx import HTTPError
 from pydantic import BaseModel, Field
 
 from data_pipeline import fetch_active_satellites, fetch_asteroids
+from gemini_client import GeminiConfigurationError, get_gemini_client
 from look_angles import calculate_altitude_km, calculate_look_angles
-
-# Resolve configuration relative to this file so launching from the repository
-# root or from backend/ loads the same local secrets file.
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 logger = logging.getLogger("near_earth_explorer")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -245,7 +240,7 @@ async def _execute_tool_call(
 
 
 async def _generate_content(
-    client: genai.Client,
+    client: Any,
     contents: Any,
     tools: list[types.Tool],
 ) -> Any:
@@ -388,11 +383,14 @@ async def assistant_query(request: QueryRequest) -> dict[str, Any]:
     tools, this route executes each declared function, sends function results
     back in turn two, and returns the synthesized answer.
     """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not configured.")
+    try:
+        client = get_gemini_client()
+    except GeminiConfigurationError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is not configured.",
+        ) from error
 
-    client = genai.Client(api_key=api_key)
     tools = _tool_declarations()
     prompt = (
         f"Observer location: latitude {request.user_lat}, longitude "
@@ -469,9 +467,12 @@ async def assistant_query(request: QueryRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as error:
-        # SDK/provider errors are logged for operators and translated to a
-        # stable gateway response without leaking keys or upstream internals.
-        logger.exception("Gemini assistant request failed")
+        # Do not log provider exception text: SDK errors may include request
+        # details. Keep diagnostics to the exception type, never its contents.
+        logger.error(
+            "Gemini assistant request failed (%s).",
+            type(error).__name__,
+        )
         raise HTTPException(
             status_code=502,
             detail="Gemini is temporarily unavailable; please try again.",
