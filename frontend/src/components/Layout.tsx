@@ -1,40 +1,26 @@
-import { css, type Delegate } from 'dreamland/core'
-import { Link, type LayoutComponent } from 'dreamland/router'
+import { css, type Component, type ComponentChild } from 'dreamland/core'
+import { Link } from 'dreamland/router'
 import { StarField } from './StarField'
 
-export const createLayout = (setStarSpeedEased: Delegate<number>): LayoutComponent => {
-  const Layout: LayoutComponent = function () {
-    const setSpeedForRoute = (path: string) => {
-      if (path === '/app') {
-        setStarSpeedEased(0.55)
-      } else if (path === '/') {
-        setStarSpeedEased(2.4)
-      } else {
-        setStarSpeedEased(10)
-      }
-    }
+export const Layout: Component<{ children?: ComponentChild }> = function (cx) {
+  return (
+    <div class="site-shell">
+      <header class="site-header">
+        <Link href="/" class="site-brand">Near Earth Explorer</Link>
+        <nav class="site-nav" aria-label="Primary navigation">
+          <Link href="/">Home</Link>
+          <Link href="/app">App</Link>
+        </nav>
+      </header>
+      <main class="site-content">
+        <StarField speedMultiplier={2.4} />
+        {cx.children}
+      </main>
+    </div>
+  )
+}
 
-    use(this.routerState.path).listen(setSpeedForRoute)
-    queueMicrotask(() => setSpeedForRoute(this.routerState.path))
-
-    return (
-      <div class="site-shell">
-        <header class="site-header">
-          <Link href="/" class="site-brand">Near Earth Explorer</Link>
-          <nav class="site-nav" aria-label="Primary navigation">
-            <Link href="/">Home</Link>
-            <Link href="/app">App</Link>
-          </nav>
-        </header>
-        <main class="site-content">
-          <StarField speedMultiplier={1} setSpeedEased={setStarSpeedEased} />
-          {use(this.routerState.outlet)}
-        </main>
-      </div>
-    )
-  }
-
-  Layout.style = css`
+Layout.style = css`
   :scope {
     height: 100svh;
     display: flex;
@@ -86,7 +72,4 @@ export const createLayout = (setStarSpeedEased: Delegate<number>): LayoutCompone
   :scope fieldset {
     all: unset;
   }
-  `
-
-  return Layout
-}
+`

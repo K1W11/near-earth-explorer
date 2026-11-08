@@ -19,7 +19,7 @@ type StarFieldProps = {
   setSpeedEased?: Delegate<number>
 }
 
-export const StarField: Component<StarFieldProps, { canvas: HTMLCanvasElement }> = function () {
+export const StarField: Component<StarFieldProps, { canvas: HTMLCanvasElement }> = function (cx) {
   let speedMultiplier = this.speedMultiplier
   let targetSpeedMultiplier = speedMultiplier
   let easingStartSpeed = speedMultiplier
@@ -37,7 +37,7 @@ export const StarField: Component<StarFieldProps, { canvas: HTMLCanvasElement }>
     easingElapsed = 0
   })
 
-  this.cx.mount = (() => {
+  cx.mount = (() => {
     const canvas = this.canvas
     const stars: Star[] = []
     let paused = false

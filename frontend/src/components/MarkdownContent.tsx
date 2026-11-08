@@ -14,13 +14,13 @@ const renderMarkdown = (content: string) => {
   })
 }
 
-export const MarkdownContent: Component<MarkdownContentProps, { element: HTMLElement | null }> = function () {
+export const MarkdownContent: Component<MarkdownContentProps, { element: HTMLElement | null }> = function (cx) {
   this.element = null
   const update = () => {
     if (this.element) this.element.innerHTML = renderMarkdown(this.content)
   }
   use(this.content).listen(update)
-  this.cx.mount = () => {
+  cx.mount = () => {
     update()
   }
 

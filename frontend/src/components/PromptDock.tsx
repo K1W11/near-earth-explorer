@@ -35,7 +35,7 @@ export const PromptDock: Component<PromptDockProps, {
   conversationAtBottom: boolean
   status: 'idle' | 'loading' | 'error'
   errorMessage: string
-}> = function () {
+}> = function (cx) {
   this.textarea = null
   this.conversationElement = null
   this.conversationList = null
@@ -83,7 +83,7 @@ export const PromptDock: Component<PromptDockProps, {
     const textarea = event.currentTarget as HTMLTextAreaElement
     textarea.form?.requestSubmit()
   }
-  this.cx.mount = () => {
+  cx.mount = () => {
     use(this.selectedSatellite).listen(() => {
       this.conversations = []
       this.conversationOpen = false
@@ -146,10 +146,10 @@ export const PromptDock: Component<PromptDockProps, {
   }
 
   return (
-    <div class={use`prompt-stack ${use(this.conversationOpen).map((open) => open ? 'is-conversation-open' : 'is-conversation-closed')}`}>
+    <div class={use(this.conversationOpen).map((open) => `prompt-stack ${open ? 'is-conversation-open' : 'is-conversation-closed'}`)}>
       {use(this.conversations).map((entries) => entries.length > 0
         ? (
-          <section class={use`conversation-log ${use(this.conversationOpen).map((open) => open ? 'is-open' : 'is-closed')}`} this={use(this.conversationElement)} aria-live="polite">
+          <section class={use(this.conversationOpen).map((open) => `conversation-log ${open ? 'is-open' : 'is-closed'}`)} this={use(this.conversationElement)} aria-live="polite">
             <div class="conversation-log-content">
               <div class="conversation-list" this={use(this.conversationList)} on:scroll={updateConversationScroll}>
                 {entries.map((entry) => (

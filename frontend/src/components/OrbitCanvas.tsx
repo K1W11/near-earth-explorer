@@ -112,7 +112,7 @@ type OrbitCanvasState = {
   trayOpen: boolean
 }
 
-export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
+export const OrbitCanvas: Component<{}, OrbitCanvasState> = function (cx) {
   this.satellites = []
   this.status = 'loading'
   this.errorMessage = ''
@@ -123,7 +123,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
   this.trayOpen = false
   let addNarrationNotification = (_message: string, _error?: boolean, _stop?: () => void) => {}
 
-  this.cx.mount = () => {
+  cx.mount = () => {
     const canvas = this.canvas
     const context = canvas.getContext('2d')
     if (!context) {
