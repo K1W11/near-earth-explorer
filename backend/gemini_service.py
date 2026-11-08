@@ -24,20 +24,14 @@ logger = logging.getLogger("uvicorn.error")
 # SYSTEM PROMPT & GUARDRAILS CONSTRUCT
 # ==============================================================================
 SYSTEM_INSTRUCTION = """
-You are the official Near Earth Explorer AI Space Tracking Assistant.
-Your sole purpose is to assist users with tracking satellites, analyzing near-Earth asteroids, computing sky-gazing look angles, and explaining space phenomena.
+You are the Near Earth Explorer Factual Data Extractor and Orbital Analyst.
+Your ONLY function is to extract telemetry, orbital mechanics, and factual data about space objects based strictly on the provided context or tools.
 
-STRICT GUARDRAILS & DOMAIN CONSTRAINTS:
-1. SPACE-ONLY DOMAIN CONSTRAINT: You must strictly reject any off-topic queries that do not relate to astronomy, space exploration, satellites, asteroids, orbital mechanics, or celestial tracking (e.g., general programming, politics, cooking, non-space weather, personal advice). 
-   - For off-topic requests, respond EXACTLY with:
-     "I am specialized strictly in space tracking and Near-Earth Objects. Please ask a space or target-related question."
-
-2. ANTI-HALLUCINATION TELEMETRY RULE: Never invent, extrapolate, or estimate satellite coordinates, Azimuth/Elevation angles, Two-Line Element (TLE) parameters, or asteroid miss distances.
-   - You MUST rely exclusively on data returned from the provided backend tools (`get_closest_asteroid`, `get_observer_look_angles`) or explicit context provided in the prompt. Never guess or fabricate telemetry.
-   - If a requested space object is not found or a tool returns an error/empty state, state directly that live telemetry data is currently unavailable rather than fabricating values.
-
-3. CONTEXT & TARGET PRIORITIZATION:
-   - When an active selected target context is provided, prioritize answering user queries in direct relation to that specific object (e.g., explaining its size, hazard status, orbit, or computing look angles relative to the observer location).
+STRICT EXTRACTION & REFUSAL PROTOCOL:
+1. OUT-OF-BOUNDS REJECTION: You have no opinions, preferences, or general knowledge outside of space tracking. Evaluate the <USER_QUERY>. If it asks about food (e.g., hamburgers vs cheeseburgers), general programming, politics, or any non-space topic, you MUST reject it cleanly.
+   - Exact Rejection Phrase: "This topic does not fall under my expertise. I am specialized strictly in tracking Near-Earth Objects and satellites. Please ask a space-related question."
+2. TARGET EXTRACTION: If <ACTIVE_TARGET_CONTEXT> is provided, you must act solely as a data extractor. Synthesize your answer DIRECTLY and EXCLUSIVELY from the data within the XML tags. Do not pull in outside historical facts or unprompted details.
+3. ANTI-HALLUCINATION: Never invent, guess, or estimate satellite coordinates, TLE parameters, or asteroid miss distances. If the answer cannot be extracted from the <ACTIVE_TARGET_CONTEXT> or a tool response, state directly: "Live telemetry for this query is currently unavailable."
 """
 
 
@@ -71,7 +65,7 @@ def format_turn_1_prompt(
     if selected_object is not None:
         normalized_type = str(selected_object.get("type", "Unknown")).strip().lower()
         target_lines = [
-            "=== ACTIVE SELECTED TARGET CONTEXT ===",
+            "<ACTIVE_TARGET_CONTEXT>",
             f"Type: {normalized_type}",
             f"Name: {selected_object.get('name', 'Unknown')}",
         ]
@@ -171,15 +165,13 @@ def format_turn_1_prompt(
                 and not isinstance(value, (dict, list))
             )
 
-        target_lines.append("=====================================")
+        target_lines.append("</ACTIVE_TARGET_CONTEXT>")
         prompt_parts.append("\n".join(target_lines))
 
-    # Explicit labels make the user's location distinguishable from coordinates
-    # or values that may appear in the selected object's metadata.
     prompt_parts.append(
-        f"Observer Location: Latitude {user_lat}, Longitude {user_lon}"
+        f"<OBSERVER_LOCATION>Latitude {user_lat}, Longitude {user_lon}</OBSERVER_LOCATION>"
     )
-    prompt_parts.append(f"User Query: {user_query}")
+    prompt_parts.append(f"<USER_QUERY>{user_query}</USER_QUERY>")
     return "\n".join(prompt_parts)
 
 
@@ -307,7 +299,7 @@ async def run_assistant_query(
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_INSTRUCTION,
         tools=tools,
-        temperature=0.2,
+        temperature=0.0,
     )
 
     # The Google SDK method is synchronous; move network I/O off the ASGI event
