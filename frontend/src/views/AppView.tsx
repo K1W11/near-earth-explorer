@@ -1,6 +1,7 @@
 import { css, type Component } from 'dreamland/core'
 import earthDark from '../assets/pixelearth.png'
 import { fetchActiveSatellites, type Satellite } from '../api/backend'
+import { NarrationPlayer } from '../components/NarrationPlayer'
 
 const satelliteAngle = (satellite: Satellite, index: number) => {
   let hash = index
@@ -178,6 +179,17 @@ export const AppView: Component<{}, OrbitCanvasState> = function () {
           if (status === 'error') return <p role="alert">{use(this.errorMessage)}</p>
           return <p>{use(this.satellites).map((satellites) => `${satellites.length} satellites in orbit`)}</p>
         })}
+        {/* Temporary test control: replace with the selected object once click-to-select exists. */}
+        {use(this.satellites).map((satellites) => (
+          satellites[0]
+            ? (
+              <div class="narration-test">
+                <p>Test narration: {satellites[0].name}</p>
+                <NarrationPlayer name={satellites[0].name} type="satellite" />
+              </div>
+            )
+            : null
+        ))}
       </section>
       <canvas
         class="orbit-canvas"
