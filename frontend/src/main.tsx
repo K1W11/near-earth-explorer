@@ -14,9 +14,9 @@ const App: Component<{ url?: string }> = function () {
 		<div id="app">
 			<Router initial={this.url ? [this.url, "http://127.0.0.1:5173"] : []}>
 				<Route layout={createLayout(setStarSpeedEased)}>
-					<Route show={<MainView />} />
-					<Route path="app" show={<AppView />} />
-					<Route path="*" show={<NotFoundView />} />
+					<Route show={() => <MainView />} />
+					<Route path="app" show={() => <AppView />} />
+					<Route path="*" show={() => <NotFoundView />} />
 				</Route>
 			</Router>
 		</div>

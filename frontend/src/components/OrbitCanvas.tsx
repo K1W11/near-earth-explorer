@@ -138,7 +138,6 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
     let rotationTarget: number | null = null
     let scrollVelocity = 0
     let previousTime = performance.now()
-    let frame = 0
     let previousMode = this.mode
     let resizeTimer: number | undefined
     let resizeObserver: ResizeObserver
@@ -161,15 +160,12 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
 
     const draw = (time: number) => {
       if (!canvas.isConnected) {
-        cancelAnimationFrame(frame)
-        resizeObserver.disconnect()
-        if (wheelListener) canvas.removeEventListener('wheel', wheelListener)
-        if (pointerMoveListener) canvas.removeEventListener('pointermove', pointerMoveListener)
-        if (pointerLeaveListener) canvas.removeEventListener('pointerleave', pointerLeaveListener)
-        if (clickListener) canvas.removeEventListener('click', clickListener)
-        if (resizeTimer !== undefined) window.clearTimeout(resizeTimer)
-        context.clearRect(0, 0, width, height)
+        requestAnimationFrame(draw)
         return
+      }
+      const bounds = canvas.getBoundingClientRect()
+      if (bounds.width !== width || bounds.height !== height) {
+        resize()
       }
 
       const elapsed = Math.min((time - previousTime) / 1000, 0.05)
@@ -309,7 +305,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
         context.restore()
       }
 
-      frame = requestAnimationFrame(draw)
+      requestAnimationFrame(draw)
     }
 
     const handleResize = () => {
@@ -401,7 +397,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
     canvas.addEventListener('pointerleave', pointerLeaveListener)
     canvas.addEventListener('click', clickListener)
     resize()
-    frame = requestAnimationFrame(draw)
+    requestAnimationFrame(draw)
 
     const loadSatellites = async () => {
       try {
