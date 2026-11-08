@@ -33,15 +33,15 @@ export const PromptDock: Component<PromptDockProps> = function () {
 
 PromptDock.style = css`
   :scope {
-    position: absolute;
-    bottom: 24px;
-    left: 50%;
+    position: relative;
+    flex: 0 0 auto;
+    align-self: center;
     z-index: 3;
     display: grid;
     gap: 6px;
     width: min(520px, calc(100% - 48px));
+    box-sizing: border-box;
     padding: 12px 14px;
-    transform: translateX(-50%);
     border: 1px solid rgb(255 255 255 / 25%);
     border-radius: 6px;
     background: rgb(0 0 0 / 78%);

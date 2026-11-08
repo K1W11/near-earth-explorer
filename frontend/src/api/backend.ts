@@ -5,6 +5,28 @@ type ActiveSatellitesResponse =
 
 export type Satellite = ActiveSatellitesResponse['satellites'][number]
 
+export type SatelliteOverview = {
+  name: string
+  norad_catalog_number: string
+  classification: string
+  international_designator: string
+  elements_epoch: string
+  altitude_km: number | null
+  orbit_class: string
+  orbit_description: string
+  orbital_period_minutes: number
+  inclination_degrees: number
+  eccentricity: number
+  right_ascension_ascending_node_degrees: number
+  argument_of_perigee_degrees: number
+  mean_anomaly_degrees: number
+  mean_motion_revolutions_per_day: number
+  revolutions_at_epoch: string
+  tle1: string
+  tle2: string
+}
+export type SatelliteNarrationCategory = 'overview' | 'orbital_position' | 'tracking'
+
 const apiBaseUrl = 'http://localhost:8000'
 
 export async function fetchActiveSatellites(limit = 50): Promise<ActiveSatellitesResponse> {
@@ -26,12 +48,25 @@ export async function fetchActiveSatellites(limit = 50): Promise<ActiveSatellite
     !satellite
     || typeof satellite !== 'object'
     || typeof (satellite as { name?: unknown }).name !== 'string'
-    || typeof (satellite as { altitude_km?: unknown }).altitude_km !== 'number'
+    || !(
+      typeof (satellite as { altitude_km?: unknown }).altitude_km === 'number'
+      || (satellite as { altitude_km?: unknown }).altitude_km === null
+    )
   ))) {
     throw new Error('Satellite response is missing altitude data; restart the backend')
   }
 
   return payload as ActiveSatellitesResponse
+}
+
+export async function fetchSatelliteOverview(name: string): Promise<SatelliteOverview> {
+  const response = await fetch(
+    `${apiBaseUrl}/api/satellites/overview?name=${encodeURIComponent(name)}`,
+  )
+  if (!response.ok) {
+    throw new Error(`Satellite overview request failed with status ${response.status}`)
+  }
+  return response.json() as Promise<SatelliteOverview>
 }
 
 type NarrationRequest =
@@ -68,8 +103,9 @@ async function narrationErrorMessage(response: Response): Promise<string> {
 export async function narrateTarget(
   name: string,
   type: NarrationTargetType,
+  category: SatelliteNarrationCategory = 'overview',
 ): Promise<Narration> {
-  const body: NarrationRequest = { object_name: name, object_type: type }
+  const body: NarrationRequest = { object_name: name, object_type: type, category }
   const response = await fetch(`${apiBaseUrl}/api/audio/narrate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -35,6 +35,7 @@ from audio import AudioError, narrate
 from gemini_client import GeminiConfigurationError, get_gemini_client
 from story import get_story
 from look_angles import calculate_altitude_km, calculate_look_angles
+from satellite_messages import satellite_overview, format_satellite_message
 
 logger = logging.getLogger("near_earth_explorer")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -90,6 +91,7 @@ class NarrationRequest(BaseModel):
 
     object_name: str = Field(min_length=1, max_length=200)
     object_type: Literal["satellite", "asteroid"]
+    category: Literal["overview", "orbital_position", "tracking"] = "overview"
 
 
 class SatelliteRecord(BaseModel):
@@ -98,7 +100,7 @@ class SatelliteRecord(BaseModel):
     name: str
     tle1: str
     tle2: str
-    altitude_km: float
+    altitude_km: float | None
 
 
 class ActiveSatellitesResponse(BaseModel):
@@ -106,6 +108,29 @@ class ActiveSatellitesResponse(BaseModel):
 
     count: int
     satellites: list[SatelliteRecord]
+
+
+class SatelliteOverview(BaseModel):
+    """Structured TLE-derived satellite facts for the frontend."""
+
+    name: str
+    norad_catalog_number: str
+    classification: str
+    international_designator: str
+    elements_epoch: str
+    altitude_km: float | None
+    orbit_class: str
+    orbit_description: str
+    orbital_period_minutes: float
+    inclination_degrees: float
+    eccentricity: float
+    right_ascension_ascending_node_degrees: float
+    argument_of_perigee_degrees: float
+    mean_anomaly_degrees: float
+    mean_motion_revolutions_per_day: float
+    revolutions_at_epoch: str
+    tle1: str
+    tle2: str
 
 
 def _tool_declarations() -> list[types.Tool]:
@@ -329,10 +354,30 @@ async def active_satellites(
         try:
             altitude_km = calculate_altitude_km(satellite["tle1"], satellite["tle2"])
         except ValueError as error:
-            logger.warning("Skipping satellite with invalid TLE %s: %s", satellite["name"], error)
+            logger.warning("Satellite %s has unavailable altitude: %s", satellite["name"], error)
+            selected.append({**satellite, "altitude_km": None})
             continue
         selected.append({**satellite, "altitude_km": round(altitude_km, 1)})
     return ActiveSatellitesResponse(count=len(selected), satellites=selected)
+
+
+@app.get("/api/satellites/overview", response_model=SatelliteOverview)
+async def satellite_overview_route(
+        name: str = Query(min_length=1, max_length=200),
+) -> SatelliteOverview:
+        """Return structured, backend-derived facts for one active satellite."""
+        satellites = await fetch_active_satellites()
+        normalized_name = name.strip().casefold()
+        for satellite in satellites:
+            if satellite["name"].strip().casefold() == normalized_name:
+                try:
+                    return SatelliteOverview(**satellite_overview(satellite))
+                except (KeyError, ValueError) as error:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="The selected satellite has invalid orbital data.",
+                    ) from error
+        raise HTTPException(status_code=404, detail=f"No active satellite matched '{name}'")
 
 
 @app.post("/api/observer/look-angles")
@@ -493,7 +538,33 @@ async def narrate_target(request: NarrationRequest) -> FileResponse:
     offline. If facts or Gemini are unavailable a generic sentence is narrated
     instead. Provider failures return a JSON 502 *before* any audio is sent.
     """
-    narration = await get_story(request.object_name, request.object_type)
+    if request.object_type == "satellite":
+        satellites = await fetch_active_satellites()
+        normalized_name = request.object_name.strip().casefold()
+        satellite = next(
+            (
+                item for item in satellites
+                if item["name"].strip().casefold() == normalized_name
+            ),
+            None,
+        )
+        if satellite is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No active satellite matched '{request.object_name}'",
+            )
+        try:
+            narration = format_satellite_message(
+                satellite_overview(satellite),
+                request.category,
+            )
+        except (KeyError, ValueError) as error:
+            raise HTTPException(
+                status_code=422,
+                detail="The selected satellite has invalid orbital data.",
+            ) from error
+    else:
+        narration = await get_story(request.object_name, request.object_type)
     try:
         # narrate() blocks on the ElevenLabs HTTP call, so keep it off the loop.
         path = await run_in_threadpool(narrate, narration)

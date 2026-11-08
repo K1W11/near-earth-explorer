@@ -4,6 +4,7 @@ import { fetchActiveSatellites, type Satellite } from '../api/backend'
 import { OrbitOverlay } from './OrbitOverlay'
 import { SelectionTray } from './SelectionTray'
 import { PromptDock } from './PromptDock'
+import { NarrationLog } from './NarrationLog'
 
 const satelliteAngle = (satellite: Satellite, index: number) => {
   let hash = index
@@ -120,6 +121,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
   this.hoveredSatellite = -1
   this.selectedSatellite = null
   this.trayOpen = true
+  let addNarrationNotification = (_message: string, _error?: boolean, _stop?: () => void) => {}
 
   this.cx.mount = () => {
     const canvas = this.canvas
@@ -202,7 +204,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
       if (width > 0 && height > 0) {
         const centerX = width / 2
         const centerY = height
-        const altitudes = this.satellites.map((satellite) => satellite.altitude_km)
+        const altitudes = this.satellites.map((satellite) => satellite.altitude_km ?? 0)
         const earthWidth = Math.min(650, width * 0.72)
         const earthRadius = earthWidth * earthGlobeDiameter / 2
         const maximumAltitude = Math.max(36_000, ...altitudes)
@@ -278,7 +280,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
         for (const [index, satellite] of this.satellites.entries()) {
           const angle = satelliteAngle(satellite, index) * Math.PI / 180
           const radius = orbitRadius(
-            satellite.altitude_km,
+            satellite.altitude_km ?? 0,
             earthRadius,
             maximumRadius,
             maximumAltitude,
@@ -342,7 +344,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
       const rotationRadians = -(rotation % 360) * Math.PI / 180
       const x = localX * Math.cos(rotationRadians) - localY * Math.sin(rotationRadians)
       const y = localX * Math.sin(rotationRadians) + localY * Math.cos(rotationRadians)
-      const altitudes = this.satellites.map((satellite) => satellite.altitude_km)
+      const altitudes = this.satellites.map((satellite) => satellite.altitude_km ?? 0)
       const maximumAltitude = Math.max(36_000, ...altitudes)
       const earthWidth = Math.min(650, width * 0.72)
       const earthRadius = earthWidth * earthGlobeDiameter / 2
@@ -352,7 +354,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
       let closestDistance = hitRadius
       for (const [index, satellite] of this.satellites.entries()) {
         const angle = satelliteAngle(satellite, index) * Math.PI / 180
-        const radius = orbitRadius(satellite.altitude_km, earthRadius, maximumRadius, maximumAltitude)
+        const radius = orbitRadius(satellite.altitude_km ?? 0, earthRadius, maximumRadius, maximumAltitude)
         const satelliteX = Math.sin(angle) * radius
         const satelliteY = -Math.cos(angle) * radius
         const distance = Math.hypot(x - satelliteX, y - satelliteY)
@@ -427,6 +429,7 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
         satellites={use(this.satellites)}
         mode={use(this.mode)}
         selectedSatellite={use(this.selectedSatellite)}
+        onNarration={(message, error, stop) => addNarrationNotification(message, error, stop)}
         onRotateToggle={() => {
           this.mode = this.mode === 'rotate' ? 'scroll' : 'rotate'
           if (this.mode === 'rotate') {
@@ -435,11 +438,15 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
           }
         }}
       />
-      <SelectionTray
-        selectedSatellite={use(this.selectedSatellite)}
-        trayOpen={use(this.trayOpen)}
-        onToggle={() => { this.trayOpen = !this.trayOpen }}
-      />
+      <div class="app-content">
+        <SelectionTray
+          selectedSatellite={use(this.selectedSatellite)}
+          trayOpen={use(this.trayOpen)}
+          onNarration={(message, error, stop) => addNarrationNotification(message, error, stop)}
+          onToggle={() => { this.trayOpen = !this.trayOpen }}
+        />
+        <NarrationLog onReady={(add) => { addNarrationNotification = add }} />
+      </div>
       <PromptDock selectedSatellite={use(this.selectedSatellite)} />
       <canvas
         class="orbit-canvas"
@@ -453,16 +460,24 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
 OrbitCanvas.style = css`
   :scope {
     position: relative;
+    --layout-gap: 16px;
     overflow: hidden;
     height: 100%;
     box-sizing: border-box;
     padding: 24px 0;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--layout-gap);
     align-items: stretch;
     color: white;
     background: rgb(0 0 0 / 28%);
+  }
+
+  :scope .app-content {
+    display: flex;
+    flex: 1 1 0;
+    min-height: 0;
+    gap: var(--layout-gap);
   }
 
   :scope .orbit-canvas {

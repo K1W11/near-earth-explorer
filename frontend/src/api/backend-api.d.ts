@@ -205,6 +205,8 @@ export interface components {
              * @enum {string}
              */
             object_type: "satellite" | "asteroid";
+            /** Narration category for structured satellite speech. */
+            category?: "overview" | "orbital_position" | "tracking";
         };
         /**
          * QueryRequest
@@ -241,7 +243,7 @@ export interface components {
             /** Tle2 */
             tle2: string;
             /** Altitude Km */
-            altitude_km: number;
+            altitude_km: number | null;
         };
         /** ValidationError */
         ValidationError: {

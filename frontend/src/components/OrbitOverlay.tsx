@@ -12,6 +12,7 @@ type OrbitOverlayProps = {
   satellites: Satellite[]
   mode: 'rotate' | 'scroll'
   selectedSatellite: Satellite | null
+  onNarration: (message: string, error?: boolean, stop?: () => void) => void
   onRotateToggle: () => void
 }
 
@@ -27,7 +28,7 @@ export const OrbitOverlay: Component<OrbitOverlayProps> = function () {
       </section>
       <div class="overlay-actions">
         {use(this.selectedSatellite).map((satellite) => satellite
-          ? <NarrationPlayer name={satellite.name} type="satellite" compact />
+          ? <NarrationPlayer name={satellite.name} type="satellite" compact onNotification={this.onNarration} />
           : (
             <button
               class="narration-placeholder"

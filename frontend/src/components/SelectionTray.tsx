@@ -1,61 +1,12 @@
 import { css, type Component } from 'dreamland/core'
-import type { Satellite } from '../api/backend'
+import { fetchSatelliteOverview, type Satellite, type SatelliteOverview } from '../api/backend'
+import { NarrationPlayer } from './NarrationPlayer'
 
 type SelectionTrayProps = {
   selectedSatellite: Satellite | null
   trayOpen: boolean
   onToggle: () => void
-}
-
-type ParsedTle = {
-  satelliteNumber: string
-  classification: string
-  internationalDesignator: string
-  epoch: string
-  inclination: number
-  raan: number
-  eccentricity: number
-  argumentOfPerigee: number
-  meanAnomaly: number
-  meanMotion: number
-  periodMinutes: number
-  revolutionNumber: string
-}
-
-const parseTle = (line1: string, line2: string): ParsedTle | null => {
-  if (line1.length < 68 || line2.length < 68) return null
-  const inclination = Number(line2.slice(8, 16))
-  const raan = Number(line2.slice(17, 25))
-  const eccentricity = Number(`0.${line2.slice(26, 33)}`)
-  const argumentOfPerigee = Number(line2.slice(34, 42))
-  const meanAnomaly = Number(line2.slice(43, 51))
-  const meanMotion = Number(line2.slice(52, 63))
-  if (![inclination, raan, eccentricity, argumentOfPerigee, meanAnomaly, meanMotion].every(Number.isFinite)) {
-    return null
-  }
-
-  const epochYear = Number(line1.slice(18, 20))
-  const epochDay = Number(line1.slice(20, 32))
-  const epochDate = Number.isFinite(epochYear) && Number.isFinite(epochDay)
-    ? new Date(Date.UTC(epochYear + (epochYear < 57 ? 2000 : 1900), 0, 1) + (epochDay - 1) * 86_400_000)
-    : null
-
-  return {
-    satelliteNumber: line1.slice(2, 7).trim(),
-    classification: line1.slice(7, 8),
-    internationalDesignator: line1.slice(9, 17).trim(),
-    epoch: epochDate && !Number.isNaN(epochDate.valueOf())
-      ? epochDate.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }) + ' UTC'
-      : 'Unknown',
-    inclination,
-    raan,
-    eccentricity,
-    argumentOfPerigee,
-    meanAnomaly,
-    meanMotion,
-    periodMinutes: 1440 / meanMotion,
-    revolutionNumber: line2.slice(63, 68).trim(),
-  }
+  onNarration: (message: string, error?: boolean, stop?: () => void) => void
 }
 
 const formatDegrees = (value: number) => `${value.toFixed(2)}°`
@@ -64,18 +15,17 @@ const formatDuration = (minutes: number) => (
     ? `${Math.floor(minutes / 60)} h ${Math.round(minutes % 60)} min`
     : `${minutes.toFixed(1)} min`
 )
-const orbitClass = (altitude: number) => (
-  altitude < 2_000 ? 'LEO' : altitude < 35_286 ? 'MEO' : altitude < 36_286 ? 'GEO' : 'HEO'
-)
-const orbitDescription = (altitude: number) => {
-  const type = orbitClass(altitude)
-  return type === 'LEO' ? 'Low Earth orbit'
-    : type === 'MEO' ? 'Medium Earth orbit'
-      : type === 'GEO' ? 'Geostationary region'
-        : 'Highly elliptical orbit'
-}
+export const SelectionTray: Component<SelectionTrayProps, { overview: SatelliteOverview | null }> = function () {
+  this.overview = null as SatelliteOverview | null
+  use(this.selectedSatellite).listen((satellite) => {
+    this.overview = null
+    if (satellite) {
+      void fetchSatelliteOverview(satellite.name).then((overview) => {
+        if (this.selectedSatellite?.name === satellite.name) this.overview = overview
+      })
+    }
+  })
 
-export const SelectionTray: Component<SelectionTrayProps> = function () {
   return (
     <aside class={use`selection-tray ${use(this.trayOpen).map((open) => open ? 'is-open' : 'is-closed')}`} aria-label="Selected satellite">
       <button class="tray-toggle" type="button" aria-expanded={use(this.trayOpen)} on:click={this.onToggle}>
@@ -83,71 +33,63 @@ export const SelectionTray: Component<SelectionTrayProps> = function () {
       </button>
       <div class="tray-content">
         {use(this.selectedSatellite).map((satellite: Satellite | null) => satellite
-          ? (() => {
-            const tle = parseTle(satellite.tle1, satellite.tle2)
-            return (
+          ? use(this.overview).map((overview: SatelliteOverview | null) => overview
+            ? (
               <article class="selected-satellite">
                 <header>
                   <strong>{satellite.name}</strong>
-                  <span>{orbitClass(satellite.altitude_km)} · {orbitDescription(satellite.altitude_km)}</span>
+                  <span>{overview.orbit_class} · {overview.orbit_description}</span>
                 </header>
                 <section class="satellite-details">
-                  <h3>Overview</h3>
+                  <h3>Overview <NarrationPlayer name={satellite.name} type="satellite" category="overview" compact onNotification={this.onNarration} /></h3>
                   <dl>
                     <dt>Altitude</dt>
-                    <dd>{satellite.altitude_km.toLocaleString(undefined, { maximumFractionDigits: 1 })} km</dd>
+                    <dd>{overview.altitude_km === null ? 'No info' : `${overview.altitude_km.toLocaleString(undefined, { maximumFractionDigits: 1 })} km`}</dd>
                     <dt>Orbit type</dt>
-                    <dd>{orbitClass(satellite.altitude_km)} · {orbitDescription(satellite.altitude_km)}</dd>
-                    {tle && (
-                      <>
-                        <dt>Orbital period</dt>
-                        <dd>{formatDuration(tle.periodMinutes)}</dd>
-                        <dt>Inclination</dt>
-                        <dd>{formatDegrees(tle.inclination)} from the equator</dd>
-                        <dt>Eccentricity</dt>
-                        <dd>{tle.eccentricity.toFixed(7)} · {tle.eccentricity < 0.01 ? 'nearly circular' : 'elliptical'}</dd>
-                      </>
-                    )}
+                    <dd>{overview.orbit_class} · {overview.orbit_description}</dd>
+                    <dt>Orbital period</dt>
+                    <dd>{formatDuration(overview.orbital_period_minutes)}</dd>
+                    <dt>Inclination</dt>
+                    <dd>{formatDegrees(overview.inclination_degrees)} from the equator</dd>
+                    <dt>Eccentricity</dt>
+                    <dd>{overview.eccentricity.toFixed(7)} · {overview.eccentricity < 0.01 ? 'nearly circular' : 'elliptical'}</dd>
                   </dl>
                 </section>
-                {tle && (
-                  <section class="satellite-details">
-                    <h3>Orbital position</h3>
+                <section class="satellite-details">
+                    <h3>Orbital position <NarrationPlayer name={satellite.name} type="satellite" category="orbital_position" compact onNotification={this.onNarration} /></h3>
                     <dl>
                       <dt>Right ascension of ascending node</dt>
-                      <dd>{formatDegrees(tle.raan)}</dd>
+                      <dd>{formatDegrees(overview.right_ascension_ascending_node_degrees)}</dd>
                       <dt>Argument of perigee</dt>
-                      <dd>{formatDegrees(tle.argumentOfPerigee)}</dd>
+                      <dd>{formatDegrees(overview.argument_of_perigee_degrees)}</dd>
                       <dt>Mean anomaly</dt>
-                      <dd>{formatDegrees(tle.meanAnomaly)}</dd>
+                      <dd>{formatDegrees(overview.mean_anomaly_degrees)}</dd>
                       <dt>Mean motion</dt>
-                      <dd>{tle.meanMotion.toFixed(8)} revolutions/day</dd>
+                      <dd>{overview.mean_motion_revolutions_per_day.toFixed(8)} revolutions/day</dd>
                     </dl>
                   </section>
-                )}
-                {tle && (
-                  <details>
-                    <summary>Tracking record</summary>
+                <details>
+                    <summary>Tracking record <NarrationPlayer name={satellite.name} type="satellite" category="tracking" compact onNotification={this.onNarration} /></summary>
                     <dl>
                       <dt>NORAD catalog number</dt>
-                      <dd>{tle.satelliteNumber} ({tle.classification})</dd>
+                      <dd>{overview.norad_catalog_number} ({overview.classification})</dd>
                       <dt>International designator</dt>
-                      <dd>{tle.internationalDesignator || 'Not available'}</dd>
+                      <dd>{overview.international_designator || 'Not available'}</dd>
                       <dt>Elements epoch</dt>
-                      <dd>{tle.epoch}</dd>
+                      <dd>{overview.elements_epoch}</dd>
                       <dt>Revolutions at epoch</dt>
-                      <dd>{tle.revolutionNumber}</dd>
+                      <dd>{overview.revolutions_at_epoch}</dd>
                     </dl>
                   </details>
-                )}
                 <details>
                   <summary>Raw two-line element set</summary>
-                  <code>{satellite.tle1}</code>
-                  <code>{satellite.tle2}</code>
+                  <code>{overview.tle1}</code>
+                  <code>{overview.tle2}</code>
                 </details>
               </article>
+              )
+              : <p class="tray-empty">Loading satellite overview...</p>
             )
-          })()
           : <p class="tray-empty">No satellite selected</p>
         )}
       </div>
@@ -157,27 +99,28 @@ export const SelectionTray: Component<SelectionTrayProps> = function () {
 
 SelectionTray.style = css`
   :scope {
-    flex: 1 1 auto;
-    align-self: flex-start;
+    flex: 0 0 320px;
+    align-self: stretch;
     z-index: 2;
     display: flex;
     width: 320px;
     max-width: 85vw;
     min-height: 0;
-    transition: width 180ms ease;
+    transition: flex-basis 180ms ease, width 180ms ease;
     border: 1px solid rgb(255 255 255 / 25%);
     border-left: 0;
     border-radius: 0 6px 6px 0;
   }
 
   :scope.is-closed {
+    flex-basis: 24px;
     width: 24px;
   }
 
   :scope .tray-content {
     flex: 1;
     display: grid;
-    gap: 12px;
+    gap: var(--layout-gap);
     overflow-y: auto;
     padding: 16px;
     padding-left: 0;
@@ -224,11 +167,25 @@ SelectionTray.style = css`
   }
 
   :scope .satellite-details h3 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin: 0;
     color: rgb(255 255 255 / 90%);
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+  }
+
+  :scope .satellite-details h3 .narration-player,
+  :scope summary .narration-player {
+    flex: 0 0 auto;
+  }
+
+  :scope summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
   :scope .satellite-details dl,
