@@ -99,22 +99,23 @@ export const SelectionTray: Component<SelectionTrayProps, { overview: SatelliteO
 
 SelectionTray.style = css`
   :scope {
-    flex: 0 0 320px;
+    flex: 1 1 0;
+    height: auto;
     align-self: stretch;
     z-index: 2;
     display: flex;
     width: 320px;
     max-width: 85vw;
     min-height: 0;
-    transition: flex-basis 180ms ease, width 180ms ease;
+    transition: width 180ms ease;
     border: 1px solid rgb(255 255 255 / 25%);
     border-left: 0;
     border-radius: 0 6px 6px 0;
   }
 
   :scope.is-closed {
-    flex-basis: 24px;
     width: 24px;
+    pointer-events: none;
   }
 
   :scope .tray-content {
@@ -131,6 +132,10 @@ SelectionTray.style = css`
 
   :scope.is-closed .tray-content {
     display: none;
+  }
+
+  :scope.is-closed .tray-toggle {
+    pointer-events: auto;
   }
 
   :scope .tray-toggle {

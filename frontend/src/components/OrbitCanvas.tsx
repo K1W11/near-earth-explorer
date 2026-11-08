@@ -423,31 +423,35 @@ export const OrbitCanvas: Component<{}, OrbitCanvasState> = function () {
 
   return (
     <section class="view app-view">
-      <OrbitOverlay
-        status={use(this.status)}
-        errorMessage={use(this.errorMessage)}
-        satellites={use(this.satellites)}
-        mode={use(this.mode)}
-        selectedSatellite={use(this.selectedSatellite)}
-        onNarration={(message, error, stop) => addNarrationNotification(message, error, stop)}
-        onRotateToggle={() => {
-          this.mode = this.mode === 'rotate' ? 'scroll' : 'rotate'
-          if (this.mode === 'rotate') {
-            this.selectedSatellite = null
-            this.trayOpen = false
-          }
-        }}
-      />
-      <div class="app-content">
-        <SelectionTray
-          selectedSatellite={use(this.selectedSatellite)}
-          trayOpen={use(this.trayOpen)}
-          onNarration={(message, error, stop) => addNarrationNotification(message, error, stop)}
-          onToggle={() => { this.trayOpen = !this.trayOpen }}
-        />
+      <div class="app-layout">
+        <div class="left-column">
+          <OrbitOverlay
+            status={use(this.status)}
+            errorMessage={use(this.errorMessage)}
+            satellites={use(this.satellites)}
+            mode={use(this.mode)}
+            selectedSatellite={use(this.selectedSatellite)}
+            onNarration={(message, error, stop) => addNarrationNotification(message, error, stop)}
+            onRotateToggle={() => {
+              this.mode = this.mode === 'rotate' ? 'scroll' : 'rotate'
+              if (this.mode === 'rotate') {
+                this.selectedSatellite = null
+                this.trayOpen = false
+              }
+            }}
+          />
+          <SelectionTray
+            selectedSatellite={use(this.selectedSatellite)}
+            trayOpen={use(this.trayOpen)}
+            onNarration={(message, error, stop) => addNarrationNotification(message, error, stop)}
+            onToggle={() => { this.trayOpen = !this.trayOpen }}
+          />
+        </div>
+        <div class="conversation-column">
+          <PromptDock selectedSatellite={use(this.selectedSatellite)} />
+        </div>
         <NarrationLog onReady={(add) => { addNarrationNotification = add }} />
       </div>
-      <PromptDock selectedSatellite={use(this.selectedSatellite)} />
       <canvas
         class="orbit-canvas"
         this={use(this.canvas)}
@@ -465,19 +469,35 @@ OrbitCanvas.style = css`
     height: 100%;
     box-sizing: border-box;
     padding: 24px 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--layout-gap);
     align-items: stretch;
     color: white;
     background: rgb(0 0 0 / 28%);
   }
 
-  :scope .app-content {
+  :scope .app-layout {
+    position: absolute;
+    inset: 24px 0;
     display: flex;
-    flex: 1 1 0;
     min-height: 0;
     gap: var(--layout-gap);
+  }
+
+  :scope .left-column {
+    display: flex;
+    flex: 0 0 320px;
+    width: 320px;
+    max-width: 85vw;
+    flex-direction: column;
+    min-height: 0;
+    gap: var(--layout-gap);
+  }
+
+  :scope .conversation-column {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    z-index: 3;
   }
 
   :scope .orbit-canvas {

@@ -37,9 +37,11 @@ export const NarrationLog: Component<NarrationLogProps, { items: Notification[];
 
 NarrationLog.style = css`
   :scope {
-    flex: 1 1 auto;
+    flex: 0 0 360px;
     align-self: stretch;
     display: flex;
+    width: 360px;
+    box-sizing: border-box;
     min-width: 0;
     min-height: 0;
     justify-content: flex-end;
