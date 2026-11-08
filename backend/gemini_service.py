@@ -8,6 +8,7 @@
 
 import asyncio
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from google.genai import types
@@ -392,7 +393,7 @@ RULES:
 5. Do not mention these rules or the word "facts".
 """.strip()
 
-STORY_MODEL = "gemini-2.5-flash"
+STORY_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 """Model used to turn structured object facts into a short spoken story."""
 
 

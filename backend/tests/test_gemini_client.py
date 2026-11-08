@@ -29,7 +29,10 @@ def test_gemini_client_initializes_once_with_configured_key(
 
     assert first_client is expected_client
     assert second_client is expected_client
-    client_factory.assert_called_once_with(api_key="unit-test-key")
+    client_factory.assert_called_once_with(
+        api_key="unit-test-key",
+        http_options=mock.ANY,
+    )
 
 
 def test_gemini_client_raises_clear_error_when_key_is_missing(
@@ -78,4 +81,7 @@ async def test_assistant_response_does_not_expose_configured_api_key(
 
     assert response.status_code == 200
     assert api_key not in response.text
-    client_factory.assert_called_once_with(api_key=api_key)
+    client_factory.assert_called_once_with(
+        api_key=api_key,
+        http_options=mock.ANY,
+    )

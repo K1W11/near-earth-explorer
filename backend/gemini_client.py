@@ -7,6 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 
 _ENV_FILE = Path(__file__).resolve().with_name(".env")
 load_dotenv(dotenv_path=_ENV_FILE)
@@ -41,5 +42,9 @@ def get_gemini_client() -> genai.Client:
             "in backend/.env."
         )
 
-    _client = genai.Client(api_key=api_key)
+    api_version = os.getenv("GEMINI_API_VERSION", "v1beta")
+    _client = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(api_version=api_version),
+    )
     return _client

@@ -26,8 +26,38 @@ export type SatelliteOverview = {
   tle2: string
 }
 export type SatelliteNarrationCategory = 'overview' | 'orbital_position' | 'tracking'
+export type AssistantResponse = {
+  query: string
+  executed_tools: Array<{ name: string; args: Record<string, unknown>; result: unknown }>
+  response: string
+}
 
 const apiBaseUrl = 'http://localhost:8000'
+
+export async function askAssistant(query: string): Promise<AssistantResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/assistant/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  })
+  if (!response.ok) {
+    let detail = `Assistant request failed with status ${response.status}`
+    try {
+      const body: unknown = await response.json()
+      if (typeof (body as { detail?: unknown })?.detail === 'string') {
+        detail = (body as { detail: string }).detail
+      }
+    } catch {
+      // Use the status message when the backend response is not JSON.
+    }
+    throw new Error(detail)
+  }
+  const payload: unknown = await response.json()
+  if (!payload || typeof payload !== 'object' || typeof (payload as { response?: unknown }).response !== 'string') {
+    throw new Error('Assistant response did not contain an answer')
+  }
+  return payload as AssistantResponse
+}
 
 export async function fetchActiveSatellites(limit = 50): Promise<ActiveSatellitesResponse> {
   const response = await fetch(

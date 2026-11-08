@@ -40,7 +40,7 @@ from satellite_messages import satellite_overview, format_satellite_message
 logger = logging.getLogger("near_earth_explorer")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 """Model used to understand astronomy questions and request structured tools."""
 
 app = FastAPI(
