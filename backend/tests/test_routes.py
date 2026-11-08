@@ -104,11 +104,16 @@ async def test_get_active_satellites_with_limit(
 ) -> None:
     """Return no more satellite TLE records than the requested route limit."""
     satellites = _satellite_records(mock_celestrak_payload, count=10)
+    # The route adds altitude_km, computed from the TLE for the current time;
+    # pin it so the expected payload below is exact and never drifts.
     with mock.patch(
         "main.fetch_active_satellites",
         new_callable=AsyncMock,
         return_value=satellites,
-    ) as fetch_satellites:
+    ) as fetch_satellites, mock.patch(
+        "main.calculate_altitude_km",
+        return_value=400.0,
+    ):
         response = await async_test_client.get(
             "/api/satellites/active",
             params={"limit": 3},
@@ -118,7 +123,9 @@ async def test_get_active_satellites_with_limit(
     payload = response.json()
     assert payload["count"] == 3
     assert len(payload["satellites"]) == 3
-    assert payload["satellites"] == satellites[:3]
+    assert payload["satellites"] == [
+        {**satellite, "altitude_km": 400.0} for satellite in satellites[:3]
+    ]
     fetch_satellites.assert_awaited_once()
 
 
