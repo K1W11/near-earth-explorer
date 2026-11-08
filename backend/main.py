@@ -26,10 +26,14 @@ from fastapi.responses import FileResponse
 from google.genai import types
 from httpx import HTTPError
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from data_pipeline import fetch_active_satellites, fetch_asteroids
+from urllib.parse import quote
+
 from audio import AudioError, narrate
 from gemini_client import GeminiConfigurationError, get_gemini_client
+from story import get_story
 from look_angles import calculate_altitude_km, calculate_look_angles
 
 logger = logging.getLogger("near_earth_explorer")
@@ -57,6 +61,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Lets browser JS read the narration transcript sent with the audio.
+    expose_headers=["X-Narration-Text"],
 )
 
 
@@ -472,30 +478,33 @@ async def assistant_query(request: QueryRequest) -> dict[str, Any]:
 
 
 @app.post("/api/audio/narrate")
-def narrate_target(request: NarrationRequest) -> FileResponse:
-    """Return an ElevenLabs narration for the selected asteroid or satellite.
+async def narrate_target(request: NarrationRequest) -> FileResponse:
+    """Return an ElevenLabs narration of a Gemini-written story for one object.
 
     Request JSON schema:
         ``object_name``: Map target name.
         ``object_type``: ``satellite`` or ``asteroid``.
 
-    Response is an ``audio/mpeg`` file. Audio is generated once per distinct
-    text by ``audio.narrate`` and then served from the on-disk cache, so repeat
-    requests cost no ElevenLabs credits and work offline. Failures are reported
-    as a JSON 502 *before* any audio is sent, so the frontend can tell an error
-    from a successful (empty) response. This is a plain ``def`` route so the
-    blocking provider call runs in FastAPI's threadpool, not on the event loop.
+    Response is an ``audio/mpeg`` file. The spoken text is also sent in the
+    ``X-Narration-Text`` header, percent-encoded (decode with
+    ``decodeURIComponent``). The story is built from the object's real data by
+    ``story.get_story`` and cached, then voiced by ``audio.narrate``, which is
+    cached too, so repeat requests cost no Gemini or ElevenLabs usage and work
+    offline. If facts or Gemini are unavailable a generic sentence is narrated
+    instead. Provider failures return a JSON 502 *before* any audio is sent.
     """
-    narration = (
-        f"Now targeting {request.object_name}. This space target is actively "
-        "monitored by Near Earth Explorer."
-    )
+    narration = await get_story(request.object_name, request.object_type)
     try:
-        path = narrate(narration)
+        # narrate() blocks on the ElevenLabs HTTP call, so keep it off the loop.
+        path = await run_in_threadpool(narrate, narration)
     except AudioError as error:
         logger.error("Narration failed for %s: %s", request.object_name, error)
         raise HTTPException(status_code=502, detail=str(error)) from error
-    return FileResponse(path, media_type="audio/mpeg")
+    return FileResponse(
+        path,
+        media_type="audio/mpeg",
+        headers={"X-Narration-Text": quote(narration)},
+    )
 
 
 if __name__ == "__main__":
