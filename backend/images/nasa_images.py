@@ -51,8 +51,7 @@ def _asteroid_name(name: str):
 
 
 # What to search for when we need a generic picture for each kind.
-GENERIC_QUERIES = {                       # asteroids use our own drawing instead (see _fallback)
-    "satellite": "satellite in orbit",
+GENERIC_QUERIES = {                       # asteroids and satellites use our own drawings (see _fallback)
     "planet": "planet",
 }
 
@@ -139,6 +138,18 @@ def _fallback(kind: str) -> dict:
             "source": "illustration",
             "illustrative": True,
             "caption": "Illustration, not a photo. No photo of this asteroid exists.",
+        }
+    if kind == "satellite":
+        # Our own drawing (see satellite_image.py, the full satellite service).
+        return {
+            "url": f"{FALLBACK_URL_PREFIX}/satellite.svg",
+            "sample_url": f"{FALLBACK_URL_PREFIX}/sample-satellite.svg",
+            "title": "Illustration of a satellite",
+            "credit": "Near Earth Explorer",
+            "page": None,
+            "source": "illustration",
+            "illustrative": True,
+            "caption": "Illustration, not a photo. No photo of this satellite is available.",
         }
     return {
         "url": f"{FALLBACK_URL_PREFIX}/{kind}.jpg",
