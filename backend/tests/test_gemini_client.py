@@ -38,6 +38,7 @@ def test_gemini_client_raises_clear_error_when_key_is_missing(
     """Raise an actionable configuration error without exposing credentials."""
     monkeypatch.setattr(gemini_client, "_client", None)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 
     with pytest.raises(
         gemini_client.GeminiConfigurationError,

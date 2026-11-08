@@ -3,7 +3,9 @@
 Usage (from backend/):  python -m scripts.pregen_audio
 Edit HERO_STORIES, or swap in M1's story generator once it exists.
 """
-from audio import audio_url, narrate
+import sys
+
+from audio import AudioError, audio_url, narrate
 
 HERO_STORIES = {
     "iss": "Hello from Near Earth Explorer. Right now, the International Space Station is racing "
@@ -12,4 +14,7 @@ HERO_STORIES = {
 
 if __name__ == "__main__":
     for name, text in HERO_STORIES.items():
-        print(f"{name}: {audio_url(narrate(text))}")
+        try:
+            print(f"{name}: {audio_url(narrate(text))}")
+        except AudioError as e:
+            sys.exit(f"{name}: {e} (copy .env.example to .env and fill in ELEVENLABS_API_KEY)")

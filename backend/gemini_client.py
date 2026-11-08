@@ -32,10 +32,13 @@ def get_gemini_client() -> genai.Client:
     if _client is not None:
         return _client
 
-    api_key = os.getenv("GEMINI_API_KEY")
+    # GOOGLE_API_KEY is the google-genai SDK's own variable name; accept it as
+    # a fallback so either convention works.
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise GeminiConfigurationError(
-            "GEMINI_API_KEY is not configured. Set it in backend/.env."
+            "GEMINI_API_KEY is not configured. Set it (or GOOGLE_API_KEY) "
+            "in backend/.env."
         )
 
     _client = genai.Client(api_key=api_key)
