@@ -42,9 +42,29 @@ def get_gemini_client() -> genai.Client:
             "in backend/.env."
         )
 
-    api_version = os.getenv("GEMINI_API_VERSION", "v1beta")
-    _client = genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(api_version=api_version),
+    # Vertex AI express-mode keys start with "AQ." and are rejected by the
+    # Gemini Developer API (API_KEY_INVALID). AI Studio keys start with "AIza".
+    # Auto-detect by prefix; GEMINI_USE_VERTEX=1/0 forces either mode.
+    force = os.getenv("GEMINI_USE_VERTEX", "").strip().lower()
+    use_vertex = (
+        force in {"1", "true", "yes"}
+        if force
+        else api_key.startswith("AQ.")
     )
+
+    if use_vertex:
+        # Leave api_version to the SDK's Vertex default unless set explicitly.
+        explicit_version = os.getenv("GEMINI_API_VERSION")
+        http_options = (
+            types.HttpOptions(api_version=explicit_version) if explicit_version else None
+        )
+        _client = genai.Client(
+            vertexai=True, api_key=api_key, http_options=http_options
+        )
+    else:
+        api_version = os.getenv("GEMINI_API_VERSION", "v1beta")
+        _client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(api_version=api_version),
+        )
     return _client
