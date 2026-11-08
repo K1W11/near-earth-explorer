@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
+from gemini_client import GeminiConfigurationError
 from main import QueryRequest, _execute_tool_call
 
 
@@ -24,8 +25,10 @@ async def test_assistant_query_missing_api_key(
 ) -> None:
     """Return HTTP 503 when Gemini credentials are not configured."""
     with (
-        mock.patch("main.os.getenv", return_value=None),
-        mock.patch("main.genai.Client") as gemini_client,
+        mock.patch(
+            "main.get_gemini_client",
+            side_effect=GeminiConfigurationError("GEMINI_API_KEY is not configured."),
+        ) as gemini_client,
     ):
         response = await async_test_client.post(
             "/api/assistant/query",
@@ -34,7 +37,7 @@ async def test_assistant_query_missing_api_key(
 
     assert response.status_code == 503
     assert "GEMINI_API_KEY is not configured" in response.json()["detail"]
-    gemini_client.assert_not_called()
+    gemini_client.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -47,8 +50,7 @@ async def test_assistant_query_single_turn_no_tools(
         text="The Moon is Earth's only natural satellite.",
     )
     with (
-        mock.patch("main.os.getenv", return_value="fake_key"),
-        mock.patch("main.genai.Client") as gemini_client,
+        mock.patch("main.get_gemini_client", return_value=object()) as gemini_client,
         mock.patch(
             "main._generate_content",
             new_callable=AsyncMock,
@@ -68,7 +70,7 @@ async def test_assistant_query_single_turn_no_tools(
     payload = response.json()
     assert payload["executed_tools"] == []
     assert payload["response"] == "The Moon is Earth's only natural satellite."
-    gemini_client.assert_called_once_with(api_key="fake_key")
+    gemini_client.assert_called_once_with()
     generate_content.assert_awaited_once()
 
 
@@ -103,8 +105,7 @@ async def test_assistant_query_two_turn_tool_execution(
     }
 
     with (
-        mock.patch("main.os.getenv", return_value="fake_key"),
-        mock.patch("main.genai.Client") as gemini_client,
+        mock.patch("main.get_gemini_client", return_value=object()) as gemini_client,
         mock.patch(
             "main.fetch_active_satellites",
             new_callable=AsyncMock,
@@ -139,7 +140,7 @@ async def test_assistant_query_two_turn_tool_execution(
     assert payload["executed_tools"][0]["args"] == {"satellite_name": "ISS"}
     assert payload["executed_tools"][0]["result"] == look_angles
     assert payload["response"] == final_answer
-    gemini_client.assert_called_once_with(api_key="fake_key")
+    gemini_client.assert_called_once_with()
     assert generate_content.await_count == 2
     fetch_satellites.assert_awaited_once()
     calculate_angles.assert_called_once_with(
@@ -181,8 +182,7 @@ async def test_assistant_query_provider_exception_returns_502(
 ) -> None:
     """Translate a Gemini SDK failure into an explicit HTTP 502 response."""
     with (
-        mock.patch("main.os.getenv", return_value="fake_key"),
-        mock.patch("main.genai.Client"),
+        mock.patch("main.get_gemini_client", return_value=object()),
         mock.patch(
             "main._generate_content",
             new_callable=AsyncMock,

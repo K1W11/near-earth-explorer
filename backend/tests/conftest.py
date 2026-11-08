@@ -139,8 +139,8 @@ def mock_gemini_client():
     Consumers: ``test_assistant.py`` exercise the two-turn tool execution
     lifecycle. The first response requests ``get_closest_asteroid`` and carries
     candidate conversation content; the next response supplies synthesized
-    answer text. The yielded mock is the patched ``main.genai.Client`` class,
-    so tests can inspect its instantiated client's generation calls.
+    answer text.     The yielded mock is the patched ``main.get_gemini_client`` function,
+    so tests can inspect the shared client's generation calls.
     """
     function_call = SimpleNamespace(
         name="get_closest_asteroid",
@@ -157,13 +157,13 @@ def mock_gemini_client():
         text="The closest asteroid is 2009 JR5.",
     )
 
-    with mock.patch("main.genai.Client") as client_class:
-        client = client_class.return_value
-        client.models.generate_content.side_effect = [
-            tool_call_response,
-            final_text_response,
-        ]
-        yield client_class
+    client = mock.MagicMock()
+    client.models.generate_content.side_effect = [
+        tool_call_response,
+        final_text_response,
+    ]
+    with mock.patch("main.get_gemini_client", return_value=client) as getter:
+        yield getter
 
 
 @pytest.fixture
