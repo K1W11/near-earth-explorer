@@ -42,15 +42,11 @@ def get_gemini_client() -> genai.Client:
             "in backend/.env."
         )
 
-    # Vertex AI express-mode keys start with "AQ." and are rejected by the
-    # Gemini Developer API (API_KEY_INVALID). AI Studio keys start with "AIza".
-    # Auto-detect by prefix; GEMINI_USE_VERTEX=1/0 forces either mode.
+    # Vertex mode is opt-in because it uses the Vertex endpoint and its
+    # separate API-version namespace. The default must remain the Gemini
+    # Developer API so GEMINI_API_VERSION=v1beta is honored.
     force = os.getenv("GEMINI_USE_VERTEX", "").strip().lower()
-    use_vertex = (
-        force in {"1", "true", "yes"}
-        if force
-        else api_key.startswith("AQ.")
-    )
+    use_vertex = force in {"1", "true", "yes"}
 
     if use_vertex:
         # Leave api_version to the SDK's Vertex default unless set explicitly.

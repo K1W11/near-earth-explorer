@@ -87,10 +87,10 @@ async def test_assistant_response_does_not_expose_configured_api_key(
     )
 
 
-def test_gemini_client_uses_vertex_mode_for_express_keys(
+def test_gemini_client_does_not_infer_vertex_mode_from_key_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Vertex AI express keys ("AQ." prefix) need vertexai=True to be accepted."""
+    """Key prefixes do not override the configured Developer API endpoint."""
     monkeypatch.setattr(gemini_client, "_client", None)
     monkeypatch.setenv("GEMINI_API_KEY", "AQ.fake-express-key")
     monkeypatch.delenv("GEMINI_USE_VERTEX", raising=False)
@@ -99,6 +99,4 @@ def test_gemini_client_uses_vertex_mode_for_express_keys(
     with mock.patch("gemini_client.genai.Client") as client_factory:
         gemini_client.get_gemini_client()
 
-    client_factory.assert_called_once_with(
-        vertexai=True, api_key="AQ.fake-express-key", http_options=None
-    )
+    client_factory.assert_called_once_with(api_key="AQ.fake-express-key", http_options=mock.ANY)

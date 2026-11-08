@@ -33,6 +33,7 @@ from data_pipeline import fetch_active_satellites, fetch_asteroids
 from urllib.parse import quote
 
 from audio import AudioError, narrate
+from audio.voice import MAX_CHARS
 from gemini_client import GeminiConfigurationError, get_gemini_client
 from story import get_story
 from look_angles import calculate_altitude_km, calculate_look_angles
@@ -54,7 +55,22 @@ def _tool_result_fallback(result: dict[str, Any]) -> str:
         altitude = nearest.get("altitude_km")
         if isinstance(name, str) and isinstance(altitude, (int, float)):
             return f"The nearest active satellite is {name}, at approximately {altitude:.1f} km altitude."
+    look_angles = result.get("formatted")
+    if isinstance(look_angles, str):
+        return f"Live satellite telemetry: {look_angles}."
+    closest = result.get("closest_asteroid")
+    if isinstance(closest, dict) and isinstance(closest.get("name"), str):
+        return f"The closest asteroid in the current feed is {closest['name']}."
     return "I found live telemetry, but Gemini could not summarize it. Please try again."
+
+
+def _bounded_narration_text(text: str) -> str:
+    """Keep approved Gemini narration within ElevenLabs' request limit."""
+    normalized = " ".join(text.split())
+    if len(normalized) <= MAX_CHARS:
+        return normalized
+    truncated = normalized[: MAX_CHARS - 3].rsplit(" ", 1)[0].rstrip()
+    return f"{truncated}..."
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 """Model used to understand astronomy questions and request structured tools."""
@@ -455,7 +471,13 @@ async def satellite_overview_route(
         name: str = Query(min_length=1, max_length=200),
 ) -> SatelliteOverview:
         """Return structured, backend-derived facts for one active satellite."""
-        satellites = await fetch_active_satellites()
+        try:
+            satellites = await fetch_active_satellites()
+        except HTTPError as error:
+            raise HTTPException(
+                status_code=503,
+                detail="Satellite telemetry is temporarily unavailable.",
+            ) from error
         normalized_name = name.strip().casefold()
         for satellite in satellites:
             if satellite["name"].strip().casefold() == normalized_name:
@@ -608,7 +630,7 @@ async def assistant_query(request: QueryRequest) -> dict[str, Any]:
         if final_response.function_calls:
             logger.warning("Gemini requested another tool turn; using the first tool results.")
         answer = final_response.text
-        if not answer and final_response.function_calls and executed_tools:
+        if not answer and executed_tools:
             answer = _tool_result_fallback(executed_tools[-1]["result"])
         if not answer:
             raise HTTPException(
@@ -657,10 +679,17 @@ async def narrate_target(request: NarrationRequest) -> FileResponse:
         narration = _assistant_responses.get(request.response_id)
         if narration is None:
             raise HTTPException(status_code=404, detail="Assistant response was not found or has expired.")
+        narration = _bounded_narration_text(narration)
     elif request.object_name is None or request.object_type is None:
         raise HTTPException(status_code=422, detail="Provide response_id or a backend-derived narration target.")
     elif request.object_type == "satellite":
-        satellites = await fetch_active_satellites()
+        try:
+            satellites = await fetch_active_satellites()
+        except HTTPError as error:
+            raise HTTPException(
+                status_code=503,
+                detail="Satellite telemetry is temporarily unavailable.",
+            ) from error
         normalized_name = request.object_name.strip().casefold()
         satellite = next(
             (

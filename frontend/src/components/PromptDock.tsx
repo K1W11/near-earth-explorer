@@ -260,7 +260,8 @@ PromptDock.style = css`
 
   :scope .conversation-log {
     position: relative;
-    display: block;
+    display: flex;
+    flex-direction: column;
     flex: 0 1 auto;
     min-height: 0;
     margin-top: auto;
@@ -297,7 +298,9 @@ PromptDock.style = css`
     position: relative;
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
     min-height: 0;
+    max-height: 100%;
     overflow: hidden;
   }
 
@@ -343,14 +346,14 @@ PromptDock.style = css`
 
   :scope .conversation-list {
     display: grid;
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     gap: 12px;
     width: 100%;
     padding: 16px;
     overflow-y: auto;
     scrollbar-width: none;
     min-height: 0;
-    max-height: 100%;
+    max-height: none;
   }
 
   :scope .conversation-list::-webkit-scrollbar {
