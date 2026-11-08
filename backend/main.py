@@ -48,7 +48,7 @@ GEMINI_MODEL = "gemini-2.5-flash"
 RACHEL_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 """ElevenLabs voice ID for the voice named Rachel."""
 
-ELEVENLABS_MODEL = "eleven_monolingual_v1"
+ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
 """Model used to generate narration for a selected satellite or asteroid."""
 
 app = FastAPI(
