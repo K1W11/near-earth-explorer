@@ -169,7 +169,7 @@ async def _execute_tool_call(
         if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 5:
             return {"error": "count must be an integer between 1 and 5"}
         try:
-            asteroids = await fetch_asteroids()
+            asteroids = await fetch_asteroids(os.getenv("NASA_API_KEY", "DEMO_KEY"))
         except HTTPError as error:
             logger.warning("NASA NeoWs request failed during Gemini tool call: %s", error)
             raise HTTPException(
@@ -210,10 +210,10 @@ async def _execute_tool_call(
 
         try:
             return calculate_look_angles(
-                tle_line1=match["tle_line1"],
-                tle_line2=match["tle_line2"],
-                latitude_deg=request.user_lat,
-                longitude_deg=request.user_lon,
+                tle_line1=match["tle1"],
+                tle_line2=match["tle2"],
+                observer_lat=request.user_lat,
+                observer_lon=request.user_lon,
                 satellite_name=match["name"],
             )
         except (KeyError, ValueError) as error:
@@ -281,7 +281,7 @@ async def closest_asteroid() -> dict[str, Any]:
     first record, or null when the window is empty) and ``total_7_day_count``.
     """
     try:
-        asteroids = await fetch_asteroids()
+        asteroids = await fetch_asteroids(os.getenv("NASA_API_KEY", "DEMO_KEY"))
     except HTTPError as error:
         logger.warning("NASA NeoWs request failed: %s", error)
         raise HTTPException(
@@ -340,8 +340,8 @@ async def observer_look_angles(
         return calculate_look_angles(
             tle_line1=tle1,
             tle_line2=tle2,
-            latitude_deg=request.user_lat,
-            longitude_deg=request.user_lon,
+            observer_lat=request.user_lat,
+            observer_lon=request.user_lon,
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

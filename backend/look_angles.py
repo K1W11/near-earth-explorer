@@ -1,223 +1,294 @@
-"""Sky-gazing look-angle calculations for Near Earth Explorer.
+"""Transform published satellite TLEs into an observer's local sky coordinates.
 
-This module is the orbital-mechanics boundary between a satellite's published
-CelesTrak TLE and the frontend's observer-centered map. SGP4 produces a TEME
-position, which is rotated to Earth-fixed coordinates, differenced against a
-WGS-84 observer position, and projected into the local east/north/up horizon.
-The output is azimuth, elevation, range, and a compass direction for the API.
+This module is the orbital-mechanics boundary between CelesTrak's published
+Two-Line Element (TLE) sets and Near Earth Explorer's observer-centered map.
+SGP4 parses each TLE and propagates the satellite's position in the
+True-Equator, Mean-Equinox frame (TEME, commonly treated as the ECI frame for
+this calculation). Greenwich Mean Sidereal Time rotates that inertial position
+into an Earth-fixed (ECEF) position. The observer's WGS-84 geodetic location is
+also converted to ECEF; subtracting the two positions gives the topocentric
+line-of-sight vector. Finally, a rotation into the observer's local
+East-North-Up (ENU) horizon frame yields azimuth, elevation, range, and compass
+direction for the frontend.
+
+The route layer in ``main.py`` supplies the selected satellite's TLE and user
+location to ``calculate_look_angles``. Its response is directly JSON-ready,
+with the display-oriented fields (``cardinal_direction`` and ``formatted``)
+alongside compatibility aliases consumed by the existing API gateway.
 """
 
 from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Dict
 
-from sgp4.api import SGP4_ERRORS, Satrec, jday
+from sgp4.api import Satrec, jday
 
-DEFAULT_OBSERVER_LATITUDE = 43.0008
-"""Latitude of the default observer at Davis Hall, University at Buffalo."""
+_WGS84_SEMI_MAJOR_AXIS_KM = 6378.137
+"""WGS-84 ellipsoid semi-major axis, in kilometers."""
 
-DEFAULT_OBSERVER_LONGITUDE = -78.7889
-"""Longitude of the default observer at Davis Hall, University at Buffalo."""
+_WGS84_FLATTENING = 1.0 / 298.257223563
+"""WGS-84 ellipsoid flattening."""
 
-_WGS84_EQUATORIAL_RADIUS_KM = 6378.137
-_WGS84_ECCENTRICITY_SQUARED = 6.69437999014e-3
+_COMPASS_DIRECTIONS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+"""Eight compass sectors in clockwise order, with north centered on 0 degrees."""
 
 
-def _julian_date(moment: datetime) -> float:
-    """Return a UTC Julian date suitable for the SGP4 propagation API."""
+def _utc_julian_date(moment: datetime) -> tuple[float, float]:
+    """Convert a datetime to the two-part UTC Julian date used by SGP4.
+
+    Two-part Julian dates retain sub-day precision more reliably than combining
+    the integer day and fractional day into one floating-point value. A naive
+    datetime is interpreted as UTC; an aware datetime is normalized to UTC.
+    """
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     utc_moment = moment.astimezone(timezone.utc)
-    jd, fraction = jday(
+    return jday(
         utc_moment.year,
         utc_moment.month,
         utc_moment.day,
         utc_moment.hour,
         utc_moment.minute,
-        utc_moment.second + utc_moment.microsecond / 1_000_000,
+        utc_moment.second + utc_moment.microsecond / 1_000_000.0,
     )
-    return jd + fraction
 
 
 def _greenwich_mean_sidereal_time(julian_date: float) -> float:
-    """Calculate Greenwich Mean Sidereal Time in radians for TEME conversion.
+    """Calculate Greenwich Mean Sidereal Time in radians.
 
-    The SGP4 library reports positions in the True Equator, Mean Equinox frame.
-    For the horizon calculation we apply the standard GMST rotation from TEME
-    to the Earth-fixed frame (the usual TEME-to-PEF approximation).
+    The polynomial is evaluated in Julian centuries from J2000.0. Its angle is
+    reduced to one full turn before conversion to radians, giving the Earth
+    rotation angle used to relate the satellite's TEME/ECI coordinates to the
+    rotating Earth-fixed frame.
     """
     centuries = (julian_date - 2_451_545.0) / 36_525.0
-    degrees = (
+    gmst_degrees = (
         280.46061837
         + 360.98564736629 * (julian_date - 2_451_545.0)
         + 0.000387933 * centuries**2
         - centuries**3 / 38_710_000.0
-    )
-    return math.radians(degrees % 360.0)
+    ) % 360.0
+    return math.radians(gmst_degrees)
 
 
-def _teme_to_ecef(position_teme_km: tuple[float, float, float], gmst: float) -> tuple[float, float, float]:
-    """Rotate a TEME/ECI position into Earth-fixed coordinates around Z."""
-    x_teme, y_teme, z_teme = position_teme_km
-    cosine = math.cos(gmst)
-    sine = math.sin(gmst)
-    # Earth-fixed longitude lags inertial right ascension by sidereal rotation.
-    return (
-        cosine * x_teme + sine * y_teme,
-        -sine * x_teme + cosine * y_teme,
-        z_teme,
-    )
-
-
-def _observer_ecef(
-    latitude_deg: float,
-    longitude_deg: float,
-    altitude_m: float,
+def _observer_geodetic_to_ecef(
+    latitude_rad: float,
+    longitude_rad: float,
+    altitude_km: float,
 ) -> tuple[float, float, float]:
-    """Convert WGS-84 geodetic latitude/longitude/altitude to ECEF kilometers."""
-    latitude = math.radians(latitude_deg)
-    longitude = math.radians(longitude_deg)
-    altitude_km = altitude_m / 1000.0
-    sin_latitude = math.sin(latitude)
-    cos_latitude = math.cos(latitude)
-    prime_vertical_radius = _WGS84_EQUATORIAL_RADIUS_KM / math.sqrt(
-        1.0 - _WGS84_ECCENTRICITY_SQUARED * sin_latitude**2
+    """Convert WGS-84 geodetic coordinates to Earth-centered ECEF kilometers.
+
+    The prime-vertical radius accounts for the WGS-84 ellipsoid's flattening at
+    the observer's latitude. The returned axes are Earth-fixed X at the
+    equator/Greenwich meridian, Y at the equator/90 degrees east, and Z at the
+    north pole.
+    """
+    eccentricity_squared = _WGS84_FLATTENING * (2.0 - _WGS84_FLATTENING)
+    sin_latitude = math.sin(latitude_rad)
+    cos_latitude = math.cos(latitude_rad)
+    prime_vertical_radius_km = _WGS84_SEMI_MAJOR_AXIS_KM / math.sqrt(
+        1.0 - eccentricity_squared * sin_latitude**2
     )
-    return (
-        (prime_vertical_radius + altitude_km) * cos_latitude * math.cos(longitude),
-        (prime_vertical_radius + altitude_km) * cos_latitude * math.sin(longitude),
-        (
-            prime_vertical_radius * (1.0 - _WGS84_ECCENTRICITY_SQUARED)
-            + altitude_km
-        )
-        * sin_latitude,
-    )
+    radial_distance_km = prime_vertical_radius_km + altitude_km
+
+    x_ecef = radial_distance_km * cos_latitude * math.cos(longitude_rad)
+    y_ecef = radial_distance_km * cos_latitude * math.sin(longitude_rad)
+    z_ecef = (
+        prime_vertical_radius_km * (1.0 - eccentricity_squared) + altitude_km
+    ) * sin_latitude
+    return x_ecef, y_ecef, z_ecef
 
 
-def _ecef_to_enu(
-    relative_ecef_km: tuple[float, float, float],
-    latitude_deg: float,
-    longitude_deg: float,
+def _eci_to_ecef(
+    position_eci_km: tuple[float, float, float],
+    gmst_rad: float,
 ) -> tuple[float, float, float]:
-    """Project an ECEF relative-position vector into local east/north/up axes."""
-    latitude = math.radians(latitude_deg)
-    longitude = math.radians(longitude_deg)
-    x, y, z = relative_ecef_km
-    sin_latitude = math.sin(latitude)
-    cos_latitude = math.cos(latitude)
-    sin_longitude = math.sin(longitude)
-    cos_longitude = math.cos(longitude)
+    """Rotate a TEME/ECI position vector into the Earth-fixed frame.
 
-    # These basis vectors rotate the Earth-fixed difference vector to the
-    # observer's tangent plane: east, north, then the local vertical.
-    east = -sin_longitude * x + cos_longitude * y
-    north = (
-        -sin_latitude * cos_longitude * x
-        - sin_latitude * sin_longitude * y
-        + cos_latitude * z
+    Earth-fixed longitude is behind inertial right ascension by GMST. Applying
+    the corresponding negative Z-axis rotation gives ECEF X/Y while Z remains
+    aligned with Earth's rotation axis. The result is the conventional
+    TEME-to-pseudo-Earth-fixed (PEF) approximation used with TLE propagation.
+    """
+    x_eci, y_eci, z_eci = position_eci_km
+    cos_gmst = math.cos(gmst_rad)
+    sin_gmst = math.sin(gmst_rad)
+    return (
+        cos_gmst * x_eci + sin_gmst * y_eci,
+        -sin_gmst * x_eci + cos_gmst * y_eci,
+        z_eci,
     )
-    up = (
-        cos_latitude * cos_longitude * x
-        + cos_latitude * sin_longitude * y
-        + sin_latitude * z
+
+
+def _ecef_delta_to_enu(
+    delta_ecef_km: tuple[float, float, float],
+    latitude_rad: float,
+    longitude_rad: float,
+) -> tuple[float, float, float]:
+    """Rotate an ECEF line-of-sight vector into local east/north/up axes.
+
+    This is a rotation of the satellite-minus-observer ECEF vector (not a
+    conversion of the satellite's absolute position). The observer's geodetic
+    latitude defines the local vertical, and longitude defines the local east
+    direction. ENU is a tangent plane: positive east, positive true north, and
+    positive up away from the WGS-84 ellipsoid.
+    """
+    delta_x, delta_y, delta_z = delta_ecef_km
+    sin_latitude = math.sin(latitude_rad)
+    cos_latitude = math.cos(latitude_rad)
+    sin_longitude = math.sin(longitude_rad)
+    cos_longitude = math.cos(longitude_rad)
+
+    east_km = -sin_longitude * delta_x + cos_longitude * delta_y
+    north_km = (
+        -sin_latitude * cos_longitude * delta_x
+        - sin_latitude * sin_longitude * delta_y
+        + cos_latitude * delta_z
     )
-    return east, north, up
+    up_km = (
+        cos_latitude * cos_longitude * delta_x
+        + cos_latitude * sin_longitude * delta_y
+        + sin_latitude * delta_z
+    )
+    return east_km, north_km, up_km
 
 
-def _compass_direction(azimuth_deg: float) -> str:
-    """Map an azimuth to one of eight human-readable compass directions."""
-    directions = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
-    return directions[int((azimuth_deg + 22.5) // 45.0) % len(directions)]
+def _cardinal_direction(azimuth_deg: float) -> str:
+    """Map a clockwise-from-north azimuth to its nearest 8-point compass sector."""
+    sector_index = int((azimuth_deg + 22.5) // 45.0) % len(_COMPASS_DIRECTIONS)
+    return _COMPASS_DIRECTIONS[sector_index]
 
 
 def calculate_look_angles(
     tle_line1: str,
     tle_line2: str,
-    latitude_deg: float = DEFAULT_OBSERVER_LATITUDE,
-    longitude_deg: float = DEFAULT_OBSERVER_LONGITUDE,
-    altitude_m: float = 0.0,
+    observer_lat: float,
+    observer_lon: float,
+    observer_alt_m: float = 180.0,
+    *,
     at: datetime | None = None,
     satellite_name: str | None = None,
-) -> dict[str, Any]:
-    """Propagate a TLE and return topocentric look angles for an observer.
+) -> Dict[str, Any]:
+    """Propagate a TLE and calculate its topocentric look angles.
 
     Args:
         tle_line1: First line of a satellite Two-Line Element set.
-        tle_line2: Second line of the same TLE set.
-        latitude_deg: WGS-84 observer latitude, from -90 to +90 degrees.
-        longitude_deg: WGS-84 observer longitude, from -180 to +180 degrees.
-        altitude_m: Observer altitude above the WGS-84 ellipsoid in meters.
-        at: UTC propagation instant; a naive datetime is interpreted as UTC.
-        satellite_name: Optional name carried into the API result.
+        tle_line2: Second line of that same TLE set.
+        observer_lat: WGS-84 observer latitude in degrees, in ``[-90, 90]``.
+        observer_lon: WGS-84 observer longitude in degrees, in ``[-180, 180]``.
+        observer_alt_m: Observer altitude above the ellipsoid, in meters.
+            Defaults to 180 meters for the UB campus.
+        at: Optional propagation instant. If omitted, the current UTC time is
+            used. Naive datetimes are interpreted as UTC.
+        satellite_name: Optional name included in the response for API callers.
 
     Returns:
-        A JSON-ready mapping with azimuth, elevation, range, compass direction,
-        line-of-sight visibility, observer coordinates, and calculation time.
+        A JSON-ready mapping with ``azimuth``, ``elevation``, ``range_km``,
+        ``cardinal_direction``, and a human-readable ``formatted`` summary.
+        Compatibility fields (``azimuth_deg``, ``elevation_deg``,
+        ``compass_direction``, ``visible``, and observer/time metadata) are also
+        included for the existing FastAPI response schema.
 
     Raises:
-        ValueError: If coordinates are outside valid ranges or SGP4 rejects the
-            TLE/epoch propagation. Request-level shape validation is provided by
-            the FastAPI/Pydantic models in ``main.py``.
+        ValueError: If coordinates or TLE line labels are invalid, the observer
+            and satellite positions coincide, SGP4 rejects propagation, or the
+            TLE cannot be parsed.
     """
-    if not -90.0 <= latitude_deg <= 90.0:
-        raise ValueError("latitude_deg must be between -90 and 90 degrees")
-    if not -180.0 <= longitude_deg <= 180.0:
-        raise ValueError("longitude_deg must be between -180 and 180 degrees")
-    if altitude_m < -500.0:
-        raise ValueError("altitude_m must be at least -500 meters")
+    if not math.isfinite(observer_lat) or not -90.0 <= observer_lat <= 90.0:
+        raise ValueError("observer_lat must be a finite value between -90 and 90 degrees")
+    if not math.isfinite(observer_lon) or not -180.0 <= observer_lon <= 180.0:
+        raise ValueError("observer_lon must be a finite value between -180 and 180 degrees")
+    if not math.isfinite(observer_alt_m) or observer_alt_m < -500.0:
+        raise ValueError("observer_alt_m must be finite and at least -500 meters")
     if not tle_line1.startswith("1 ") or not tle_line2.startswith("2 "):
         raise ValueError("A valid TLE line 1 and line 2 are required")
 
-    moment = at or datetime.now(timezone.utc)
+    # Step 1: parse the element set and propagate its mean orbital elements.
+    # SGP4 returns TEME position (kilometers) and velocity (kilometers/second).
+    try:
+        satellite = Satrec.twoline2rv(tle_line1, tle_line2)
+    except ValueError as error:
+        raise ValueError(f"Could not parse satellite TLE: {error}") from error
+
+    moment = at if at is not None else datetime.now(timezone.utc)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     moment = moment.astimezone(timezone.utc)
+    jd, fraction = _utc_julian_date(moment)
+    error_code, position_eci_km, _ = satellite.sgp4(jd, fraction)
+    if error_code != 0:
+        raise ValueError(f"SGP4 propagation failed with error code {error_code}")
 
-    satellite = Satrec.twoline2rv(tle_line1, tle_line2)
-    jd, fraction = jday(
-        moment.year,
-        moment.month,
-        moment.day,
-        moment.hour,
-        moment.minute,
-        moment.second + moment.microsecond / 1_000_000,
+    # Step 2: convert the observer's geodetic location to WGS-84 Earth-fixed
+    # coordinates. SGP4 uses kilometers, so convert the observer altitude too.
+    latitude_rad = math.radians(observer_lat)
+    longitude_rad = math.radians(observer_lon)
+    observer_alt_km = observer_alt_m / 1000.0
+    observer_ecef = _observer_geodetic_to_ecef(
+        latitude_rad,
+        longitude_rad,
+        observer_alt_km,
     )
 
-    # SGP4 propagates the TLE's mean elements to TEME position (kilometers).
-    error_code, position_teme_km, _velocity_km_s = satellite.sgp4(jd, fraction)
-    if error_code:
-        raise ValueError(f"SGP4 propagation failed: {SGP4_ERRORS.get(error_code, error_code)}")
-
-    ecef_satellite = _teme_to_ecef(
-        (position_teme_km[0], position_teme_km[1], position_teme_km[2]),
-        _greenwich_mean_sidereal_time(jd + fraction),
+    # Step 3: GMST aligns the inertial satellite position with Earth's rotation.
+    # The SGP4 TEME vector is transformed to the ECEF frame at the same instant.
+    gmst_rad = _greenwich_mean_sidereal_time(jd + fraction)
+    satellite_ecef = _eci_to_ecef(
+        (position_eci_km[0], position_eci_km[1], position_eci_km[2]),
+        gmst_rad,
     )
-    ecef_observer = _observer_ecef(latitude_deg, longitude_deg, altitude_m)
-    relative_ecef = tuple(
-        satellite_component - observer_component
-        for satellite_component, observer_component in zip(ecef_satellite, ecef_observer)
-    )
-    east, north, up = _ecef_to_enu(relative_ecef, latitude_deg, longitude_deg)
 
-    # Azimuth is measured clockwise from true north; elevation is above the
-    # observer's horizon plane; the norm is the slant range to the satellite.
-    azimuth_deg = math.degrees(math.atan2(east, north)) % 360.0
-    elevation_deg = math.degrees(math.atan2(up, math.hypot(east, north)))
-    range_km = math.sqrt(east**2 + north**2 + up**2)
+    # Step 4: subtract observer from satellite to obtain the relative
+    # topocentric vector, then rotate it from ECEF into the observer's ENU frame.
+    delta_ecef = (
+        satellite_ecef[0] - observer_ecef[0],
+        satellite_ecef[1] - observer_ecef[1],
+        satellite_ecef[2] - observer_ecef[2],
+    )
+    east_km, north_km, up_km = _ecef_delta_to_enu(
+        delta_ecef,
+        latitude_rad,
+        longitude_rad,
+    )
+
+    # Step 5: derive slant range and sky angles from the local horizon vector.
+    # Clamp the arcsine input to its mathematical domain to absorb roundoff.
+    range_km = math.sqrt(east_km**2 + north_km**2 + up_km**2)
+    if range_km == 0.0:
+        raise ValueError("Satellite position coincides with the observer position")
+    elevation_deg = math.degrees(
+        math.asin(max(-1.0, min(1.0, up_km / range_km)))
+    )
+    azimuth_deg = math.degrees(math.atan2(east_km, north_km)) % 360.0
+    cardinal_direction = _cardinal_direction(azimuth_deg)
+
+    # Keep numeric API fields precise to hundredths; the compact label rounds
+    # azimuth and elevation to whole degrees for easy use in a sky-gazing prompt.
+    azimuth = round(azimuth_deg, 2)
+    elevation = round(elevation_deg, 2)
+    rounded_range_km = round(range_km, 2)
+    formatted = (
+        f"{cardinal_direction} ({azimuth:.0f}°) at {elevation:.0f}° elevation"
+    )
 
     return {
+        "azimuth": azimuth,
+        "elevation": elevation,
+        "range_km": rounded_range_km,
+        "cardinal_direction": cardinal_direction,
+        "formatted": formatted,
+        # Compatibility aliases preserve the currently documented API response.
         "satellite_name": satellite_name,
-        "azimuth_deg": round(azimuth_deg, 3),
-        "elevation_deg": round(elevation_deg, 3),
-        "range_km": round(range_km, 3),
-        "compass_direction": _compass_direction(azimuth_deg),
+        "azimuth_deg": azimuth,
+        "elevation_deg": elevation,
+        "compass_direction": cardinal_direction,
         "visible": elevation_deg > 0.0,
         "observer": {
-            "latitude": latitude_deg,
-            "longitude": longitude_deg,
-            "altitude_m": altitude_m,
+            "latitude": observer_lat,
+            "longitude": observer_lon,
+            "altitude_m": observer_alt_m,
         },
         "calculated_at": moment.isoformat(),
     }
