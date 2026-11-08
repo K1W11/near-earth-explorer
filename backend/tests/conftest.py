@@ -3,7 +3,7 @@
 The fixtures in this module provide an isolated ASGI client and deterministic
 upstream/SDK responses. Individual test modules consume them according to their
 responsibility: route behavior in ``test_routes.py``, Gemini orchestration in
-``test_assistant.py``, ElevenLabs streaming in ``test_narration.py``, the
+``test_assistant.py``, narration route in ``test_narration.py``, the
 upstream parsers/cache in ``test_data_pipeline.py``, and TLE propagation in
 ``test_look_angles.py``. No fixture performs live network requests or requires
 provider credentials.
@@ -168,16 +168,24 @@ def mock_gemini_client():
 
 @pytest.fixture
 def mock_elevenlabs_client():
-    """Patch ElevenLabs with a deterministic iterator of MP3 byte chunks.
+    """Point the audio module at a temp cache and fake the ElevenLabs HTTP call.
 
-    Consumers: ``test_narration.py`` checks the narration route's streaming
-    response content type and chunked audio body without contacting the
-    ElevenLabs service. The current backend consumes
-    ``client.text_to_speech.stream``; the mocked iterator yields the same kind
-    of byte chunks a streaming SDK response supplies.
+    Consumers: ``test_narration.py`` checks the narration route's content type,
+    cache behavior, and error mapping without contacting ElevenLabs. Yields the
+    mocked ``httpx.post`` so tests can count provider calls.
     """
-    audio_chunks = [b"dummy", b"audio", b"bytes"]
-    with mock.patch("main.ElevenLabs") as client_class:
-        client = client_class.return_value
-        client.text_to_speech.stream.return_value = iter(audio_chunks)
-        yield client_class
+    import tempfile
+    from pathlib import Path
+
+    from audio import voice
+
+    def fake_post(url, **kwargs):
+        return httpx.Response(
+            200, content=b"ID3fake-mp3", request=httpx.Request("POST", url)
+        )
+
+    with tempfile.TemporaryDirectory() as tmp, \
+            mock.patch.object(voice, "AUDIO_DIR", Path(tmp)), \
+            mock.patch.dict("os.environ", {"ELEVENLABS_API_KEY": "test-key"}), \
+            mock.patch.object(voice.httpx, "post", side_effect=fake_post) as post:
+        yield post
