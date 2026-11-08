@@ -29,3 +29,6 @@ backend/.pytest_cache/
 backend/__pycache__/
 backend/audio_cache/
 backend/.venv
+# Image service caches (generated at runtime)
+backend/images/*_cache.json
+backend/images/__pycache__/
