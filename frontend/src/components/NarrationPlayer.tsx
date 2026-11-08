@@ -1,5 +1,7 @@
 import { css, type Component } from 'dreamland/core'
 import { narrateTarget, type NarrationTargetType } from '../api/backend'
+import speakerIcon from 'iconoir/icons/regular/sound-high.svg?raw'
+import { IconoirIcon } from './IconoirIcon'
 
 type NarrationPlayerState = {
   status: 'idle' | 'loading' | 'playing' | 'error'
@@ -14,7 +16,7 @@ type NarrationPlayerState = {
  * Must be started by a click: browsers block audio that starts on its own.
  */
 export const NarrationPlayer: Component<
-  { name: string; type: NarrationTargetType },
+  { name: string; type: NarrationTargetType; compact?: boolean; disabled?: boolean },
   NarrationPlayerState
 > = function () {
   this.status = 'idle'
@@ -63,19 +65,22 @@ export const NarrationPlayer: Component<
   }
 
   return (
-    <div class="narration-player">
+    <div class={`narration-player ${this.compact ? 'compact' : ''}`}>
       <button
         type="button"
-        attr:disabled={use(this.status).map((status) => status === 'loading')}
+        attr:disabled={use(this.status).map((status: NarrationPlayerState['status']) => status === 'loading' || this.disabled === true)}
+        aria-label={this.disabled ? 'Select a satellite to hear its narration' : 'Hear satellite narration'}
         on:click={play}
       >
-        {use(this.status).map((status) => {
+        {this.compact
+          ? <IconoirIcon svg={speakerIcon} />
+          : use(this.status).map((status: NarrationPlayerState['status']) => {
           if (status === 'loading') return 'Generating voice...'
           if (status === 'playing') return 'Play again'
           return 'Hear the story'
-        })}
+          })}
       </button>
-      {use(this.status).map((status) => (
+      {use(this.status).map((status: NarrationPlayerState['status']) => (
         status === 'error'
           ? <p class="error" role="alert">{use(this.errorMessage)}</p>
           : <p class="transcript" aria-live="polite">{use(this.transcript)}</p>
@@ -110,6 +115,20 @@ NarrationPlayer.style = css`
   :scope button:focus-visible {
     outline: 3px solid #9db8ff;
     outline-offset: 3px;
+  }
+
+  :scope.compact {
+    margin: 0;
+  }
+
+  :scope.compact button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 4px;
   }
 
   :scope p {

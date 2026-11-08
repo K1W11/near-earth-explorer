@@ -8,11 +8,12 @@
     "preview": "vite preview",
     "generate:api": "pnpm dlx --package typescript@5 --package openapi-typescript@7 openapi-typescript http://localhost:8000/openapi.json -o src/api/backend-api.d.ts",
     "build": "pnpm run build:client && pnpm run build:server && node prerender.js",
-		"build:client": "tsc && vite build --ssrManifest .vite/ssr-manifest.json --outDir dist/static",
-		"build:server": "tsc && vite build --ssr src/main-server.ts --outDir dist/server"
+    "build:client": "tsc && vite build --ssrManifest .vite/ssr-manifest.json --outDir dist/static",
+    "build:server": "tsc && vite build --ssr src/main-server.ts --outDir dist/server"
   },
   "dependencies": {
-    "dreamland": "github:MercuryWorkshop/dreamlandjs"
+    "dreamland": "github:MercuryWorkshop/dreamlandjs",
+    "iconoir": "^7.12.2"
   },
   "devDependencies": {
     "magic-string": "^1.4.5",
