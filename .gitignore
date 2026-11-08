@@ -24,3 +24,8 @@ build/
 .DS_Store
 .vscode/
 .idea/
+
+backend/.pytest_cache/
+backend/__pycache__/
+backend/audio_cache/
+backend/.venv
