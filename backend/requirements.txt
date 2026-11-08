@@ -1,0 +1,16 @@
+# FastAPI defines the typed HTTP API that the React/Vite/Next.js map consumes.
+fastapi>=0.110.0
+# Uvicorn runs the ASGI application; standard extras provide production-friendly transports.
+uvicorn[standard]>=0.28.0
+# SGP4 propagates CelesTrak two-line elements (TLEs) into satellite positions.
+sgp4>=2.23
+# HTTPX performs asynchronous requests to NASA NeoWs and CelesTrak.
+httpx>=0.27.0
+# Google Gen AI enables Gemini 2.5 Flash function calling for assistant queries.
+google-genai>=0.1.0
+# ElevenLabs provides streamed text-to-speech audio for selected map targets.
+elevenlabs>=1.0.0
+# Pydantic validates request payloads and the values used by the orbital engine.
+pydantic>=2.6.0
+# python-dotenv loads local backend/.env settings without placing secrets in source code.
+python-dotenv>=1.0.1
