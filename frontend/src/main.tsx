@@ -1,24 +1,26 @@
 import { css, type Component } from "dreamland/core";
-import { Router, Route } from "dreamland/router";
-import { createDelegate } from "dreamland/core";
+import { Router, Route, router } from "dreamland/router";
 
 import { MainView } from "./views/MainView";
 import { AppView } from "./views/AppView";
 import { NotFoundView } from "./views/NotFoundView";
-import { createLayout } from "./components/Layout";
+import { Layout } from "./components/Layout";
 
 const App: Component<{ url?: string }> = function () {
-	const setStarSpeedEased = createDelegate<number>();
+	const initialPath =
+		this.url ?? (typeof location === "undefined" ? "/" : location.pathname);
 
+	const routeTree = (
+		<Router>
+			<Route show={() => <MainView />} />
+			<Route path="app" show={() => <AppView />} />
+			<Route path="*" show={() => <NotFoundView />} />
+		</Router>
+	);
+	router.route(initialPath, "http://localhost");
 	return (
 		<div id="app">
-			<Router initial={this.url ? [this.url, "http://127.0.0.1:5173"] : []}>
-				<Route layout={createLayout(setStarSpeedEased)}>
-					<Route show={() => <MainView />} />
-					<Route path="app" show={() => <AppView />} />
-					<Route path="*" show={() => <NotFoundView />} />
-				</Route>
-			</Router>
+			<Layout>{routeTree}</Layout>
 		</div>
 	);
 };

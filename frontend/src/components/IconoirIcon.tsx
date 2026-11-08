@@ -5,9 +5,9 @@ type IconoirIconProps = {
   label?: string
 }
 
-export const IconoirIcon: Component<IconoirIconProps, { element: HTMLSpanElement | null }> = function () {
+export const IconoirIcon: Component<IconoirIconProps, { element: HTMLSpanElement | null }> = function (cx) {
   this.element = null
-  this.cx.mount = () => {
+  cx.mount = () => {
     if (!this.element) throw new Error('Iconoir icon element was not mounted')
     this.element.innerHTML = this.svg
   }

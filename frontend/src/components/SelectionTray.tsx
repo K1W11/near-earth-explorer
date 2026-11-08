@@ -33,7 +33,7 @@ export const SelectionTray: Component<SelectionTrayProps, { overview: SatelliteO
   })
 
   return (
-    <aside class={use`selection-tray ${use(this.trayOpen).map((open) => open ? 'is-open' : 'is-closed')}`} aria-label="Selected satellite">
+    <aside class={use(this.trayOpen).map((open) => `selection-tray ${open ? 'is-open' : 'is-closed'}`)} aria-label="Selected satellite">
       <button class="tray-toggle" type="button" aria-expanded={use(this.trayOpen)} on:click={this.onToggle}>
         {use(this.trayOpen).map((open) => open ? '‹' : '›')}
       </button>
